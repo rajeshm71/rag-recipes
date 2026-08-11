@@ -52,14 +52,15 @@ class OpenAILLM:
         max_tokens: int = 1024,
     ) -> LLMResponse:
         start = time.perf_counter()
-        kwargs = dict(
+        base_kwargs = dict(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_completion_tokens=max_tokens,
-            temperature=temperature,
         )
         try:
-            response = self._client.chat.completions.create(**kwargs)
+            response = self._client.chat.completions.create(
+                **base_kwargs, temperature=temperature
+            )
         except Exception as exc:
             # Some reasoning-capable models (e.g. gpt-5.4-mini family) reject
             # `temperature` entirely rather than clamping/ignoring it. This
@@ -67,12 +68,16 @@ class OpenAILLM:
             # (see SPEC.md P1 plan "Known technical risks"), so we handle it
             # defensively: on the specific "unsupported parameter" error,
             # retry once without temperature instead of failing the call.
+            # FIX (review #6): build a fresh call from base_kwargs (which
+            # never had temperature) instead of mutating the first call's
+            # kwargs dict via .pop() -- clearer that the two calls are
+            # independent and there's no risk of a stale mutated dict being
+            # reused if this function is ever refactored further.
             message = str(exc).lower()
             if "temperature" in message and (
                 "unsupported" in message or "not supported" in message
             ):
-                kwargs.pop("temperature")
-                response = self._client.chat.completions.create(**kwargs)
+                response = self._client.chat.completions.create(**base_kwargs)
             else:
                 raise
         latency_ms = (time.perf_counter() - start) * 1000

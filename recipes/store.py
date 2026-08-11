@@ -48,7 +48,10 @@ class VectorStore:
         )
         self._conn.commit()
 
-    def add(self, chunk_id: str, vector: list[float]) -> None:
+    def _insert(self, chunk_id: str, vector: list[float]) -> None:
+        """Insert without committing. Used by both add() (commits once
+        itself) and add_many() (commits once for the whole batch).
+        """
         if len(vector) != self.dim:
             raise ValueError(f"Expected vector of dim {self.dim}, got {len(vector)}")
         cur = self._conn.execute(
@@ -59,11 +62,20 @@ class VectorStore:
             "INSERT INTO vec_chunks (rowid, embedding) VALUES (?, ?)",
             (rowid, json.dumps(vector)),
         )
+
+    def add(self, chunk_id: str, vector: list[float]) -> None:
+        self._insert(chunk_id, vector)
         self._conn.commit()
 
     def add_many(self, chunk_ids: list[str], vectors: list[list[float]]) -> None:
+        # FIX (review #4): commit once for the whole batch instead of once
+        # per row (previously add_many() looped calling add(), which
+        # commits -- i.e. fsyncs -- after every single insert). At the
+        # pilot's 54 chunks this was invisible; at the full 300-chunk
+        # target it's ~2x more fsync-bound commits than necessary.
         for chunk_id, vector in zip(chunk_ids, vectors):
-            self.add(chunk_id, vector)
+            self._insert(chunk_id, vector)
+        self._conn.commit()
 
     def search(self, query_vector: list[float], k: int = 5) -> list[SearchResult]:
         if len(query_vector) != self.dim:

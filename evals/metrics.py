@@ -41,6 +41,13 @@ def filter_accuracy(extracted_filter: dict | None, requires_filter: dict | None)
     """For pattern 08 (self-query): 1.0 if the extracted filter exactly
     matches the ground-truth filter, else 0.0. Returns None if the question
     doesn't require a filter (so it can be excluded from the aggregate).
+
+    NOTE (review #7, documented not fixed): this is exact dict equality,
+    including value types -- {"year": "2024"} != {"year": 2024}. No
+    consumer exists yet (pattern 08 self-query lands in P4), so adding
+    type-coercion/normalization now would be speculative. Revisit this
+    once pattern 08's actual filter-extraction output shape is known,
+    rather than guessing a normalization scheme ahead of time.
     """
     if requires_filter is None:
         return None

@@ -10,6 +10,7 @@ end and print all metrics with CIs."
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -49,6 +50,11 @@ class PatternResult:
     p95_latency_ms: float
     usd_per_query: float
     eval_usd: float
+    # FIX (review #3): count of questions skipped due to a recipe_fn or
+    # judge failure, so a partial run is visible in the result rather than
+    # silently under-counted. Defaults to 0 so existing call sites/tests
+    # that don't reference this field are unaffected.
+    n_errors: int = 0
 
 
 def load_qa_set(path: str | Path) -> list[dict]:
@@ -108,44 +114,57 @@ def run_pattern(
     latencies: list[float] = []
     generation_usd_total = 0.0
     judge_usd_total = 0.0
+    n_errors = 0
 
     for record in qa_set:
         question = record["question"]
+        qid = record.get("qid", question[:40])
         relevant_ids = record["relevant_chunk_ids"]
         requires_filter = record.get("requires_filter")
 
-        result = recipe_fn(question, k=k)
+        # FIX (review #3): isolate each question so one bad recipe_fn call
+        # or unparseable judge response doesn't lose every score already
+        # collected for prior questions in this run. Previously an
+        # uncaught exception here (e.g. JudgeParseError from #2) would
+        # propagate straight out of run_pattern and discard the whole run
+        # -- costly for a real, paid eval run against real APIs.
+        try:
+            result = recipe_fn(question, k=k)
 
-        hit3_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 3))
-        hit10_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 10))
-        mrr_scores.append(mrr(result.retrieved_chunk_ids, relevant_ids))
-        latencies.append(result.latency_ms)
+            hit3_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 3))
+            hit10_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 10))
+            mrr_scores.append(mrr(result.retrieved_chunk_ids, relevant_ids))
+            latencies.append(result.latency_ms)
 
-        generation_usd_total += cost_usd(
-            generation_model,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            cached_input_tokens=result.cached_input_tokens,
-        )
+            generation_usd_total += cost_usd(
+                generation_model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cached_input_tokens=result.cached_input_tokens,
+            )
 
-        fa = filter_accuracy(result.extracted_filter, requires_filter)
-        if fa is not None:
-            filter_scores.append(fa)
+            fa = filter_accuracy(result.extracted_filter, requires_filter)
+            if fa is not None:
+                filter_scores.append(fa)
 
-        if judges_enabled:
-            context = _build_context(result.retrieved_chunk_ids, corpus_by_id)
+            if judges_enabled:
+                context = _build_context(result.retrieved_chunk_ids, corpus_by_id)
 
-            fr = judge_faithfulness(llm, question, context, result.answer)
-            faithfulness_scores.append(fr.score)
-            judge_usd_total += fr.usd_cost
+                fr = judge_faithfulness(llm, question, context, result.answer)
+                faithfulness_scores.append(fr.score)
+                judge_usd_total += fr.usd_cost
 
-            rr = judge_answer_relevance(llm, question, result.answer)
-            relevance_scores.append(rr.score)
-            judge_usd_total += rr.usd_cost
+                rr = judge_answer_relevance(llm, question, result.answer)
+                relevance_scores.append(rr.score)
+                judge_usd_total += rr.usd_cost
 
-            cr = judge_citation_accuracy(llm, context, result.answer)
-            citation_scores.append(cr.score)
-            judge_usd_total += cr.usd_cost
+                cr = judge_citation_accuracy(llm, context, result.answer)
+                citation_scores.append(cr.score)
+                judge_usd_total += cr.usd_cost
+        except Exception as exc:  # noqa: BLE001 -- deliberately broad, see comment above
+            n_errors += 1
+            print(f"  WARNING: question {qid!r} failed and was skipped: {exc}", file=sys.stderr)
+            continue
 
     p50, p95 = latency_percentiles(latencies)
     n = len(qa_set)
@@ -165,6 +184,7 @@ def run_pattern(
         p95_latency_ms=p95,
         usd_per_query=total_usd / n if n else 0.0,
         eval_usd=total_usd,
+        n_errors=n_errors,
     )
 
     if verbose:
@@ -191,3 +211,7 @@ def print_result(result: PatternResult) -> None:
     print(f"  p95_latency_ms: {result.p95_latency_ms:.1f}")
     print(f"  usd_per_query: ${result.usd_per_query:.5f}")
     print(f"  eval_usd: ${result.eval_usd:.4f}")
+    if result.n_errors:
+        print(f"  WARNING: {result.n_errors} question(s) skipped due to errors "
+              f"(see stderr) -- metrics above are computed over "
+              f"{result.n_questions - result.n_errors} of {result.n_questions} questions")

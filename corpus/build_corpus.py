@@ -221,6 +221,7 @@ def build_corpus(
     categories: list[str],
     papers_per_category: int,
     output_path: Path,
+    dry_run: bool = False,
 ) -> None:
     tokenizer = _get_tokenizer()
     all_chunks: list[dict] = []
@@ -280,6 +281,19 @@ def build_corpus(
             collected_for_category += 1
             time.sleep(1)  # be polite to arXiv's servers
 
+    # FIX (plan deviation, review): --dry-run proves the pipeline is
+    # reproducible against live arXiv data (fetch, extract, chunk) without
+    # overwriting the committed corpus.jsonl that actually ships.
+    if dry_run:
+        print()
+        print(f"[dry run] Would write {len(all_chunks)} chunks from "
+              f"{papers_used} papers to {output_path} (papers skipped: {papers_skipped}).")
+        if all_chunks:
+            preview = all_chunks[0]
+            print(f"[dry run] Sample chunk_id: {preview['chunk_id']} "
+                  f"({preview['n_tokens']} tokens, section={preview['section']})")
+        return
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         for chunk in all_chunks:
@@ -309,12 +323,20 @@ def main() -> None:
         default=str(Path(__file__).parent / "corpus.jsonl"),
         help="output path for corpus.jsonl",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="fetch and chunk as normal but don't write the output file; "
+        "proves the pipeline still works against live arXiv data without "
+        "touching the committed corpus.jsonl",
+    )
     args = parser.parse_args()
 
     build_corpus(
         categories=args.categories,
         papers_per_category=args.papers_per_category,
         output_path=Path(args.output),
+        dry_run=args.dry_run,
     )
 
 

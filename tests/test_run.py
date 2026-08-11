@@ -157,3 +157,33 @@ def test_run_pattern_judges_disabled_are_none():
     assert result.citation_accuracy is None
     # Retrieval metrics still work without judges.
     assert result.hit_at_3.mean >= 0.0
+    assert result.n_errors == 0
+
+
+def test_run_pattern_isolates_a_failing_question(capsys):
+    """Regression test for review fix #3: one recipe_fn failure must not
+    lose the scores already collected for other questions in the run.
+    """
+
+    def flaky_pattern(question: str, k: int = 5):
+        if question == FIXTURE_QA_SET[0]["question"]:
+            raise RuntimeError("simulated recipe failure")
+        return _dummy_pattern_factory()(question, k=k)
+
+    result = run_pattern(
+        recipe_fn=flaky_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(default_response='{"score": 1, "reasoning": "fine"}'),
+        judges_enabled=True,
+        verbose=False,
+    )
+
+    # One of the two fixture questions failed; the other's scores must
+    # still be present, not discarded.
+    assert result.n_errors == 1
+    assert result.hit_at_3.mean >= 0.0
+    assert result.faithfulness is not None
+
+    printed = capsys.readouterr().err
+    assert "failed and was skipped" in printed

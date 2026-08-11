@@ -23,6 +23,13 @@ CACHE_DIR = Path(__file__).resolve().parent.parent / "outputs" / ".judge_cache"
 JUDGE_MODEL = "gpt-5.4-mini-2026-03-17"
 
 
+class JudgeParseError(Exception):
+    """Raised when a judge model's response can't be parsed as the expected
+    JSON shape. Callers (evals/run.py) catch this per-question rather than
+    letting one bad response crash an entire eval run.
+    """
+
+
 @dataclass
 class JudgeResult:
     score: float
@@ -35,26 +42,58 @@ def _load_prompt(name: str) -> str:
     return (PROMPTS_DIR / name).read_text(encoding="utf-8")
 
 
-def _cache_key(judge_type: str, **fields: str) -> str:
-    payload = json.dumps({"judge_type": judge_type, "model": JUDGE_MODEL, **fields}, sort_keys=True)
+def _cache_key(judge_type: str, prompt_template: str, **fields: str) -> str:
+    # FIX (review #1): include the prompt template's own content in the
+    # cache key, not just its variable inputs. Without this, editing a
+    # judge prompt (wording fix, stricter rubric) silently reuses stale
+    # cached scores computed under the OLD prompt, which undermines the
+    # reproducibility R5 caching is meant to guarantee.
+    payload = json.dumps(
+        {
+            "judge_type": judge_type,
+            "model": JUDGE_MODEL,
+            "prompt_template": prompt_template,
+            **fields,
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _read_cache(key: str) -> dict | None:
+    # FIX (review #5): a cache file left truncated by an interrupted write
+    # (Ctrl-C mid-run) would previously raise JSONDecodeError here and crash
+    # the caller. Treat an unparseable cache file as a miss instead -- the
+    # judge call just re-runs and rewrites a good cache entry.
     path = CACHE_DIR / f"{key}.json"
-    if path.exists():
+    if not path.exists():
+        return None
+    try:
         return json.loads(path.read_text(encoding="utf-8"))
-    return None
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def _write_cache(key: str, data: dict) -> None:
+    # FIX (review #5): write atomically. Writing directly to the final path
+    # risks leaving a truncated/corrupt file if the process is killed
+    # mid-write; write-to-temp-then-replace makes the write all-or-nothing.
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    (CACHE_DIR / f"{key}.json").write_text(json.dumps(data), encoding="utf-8")
+    final_path = CACHE_DIR / f"{key}.json"
+    tmp_path = final_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(data), encoding="utf-8")
+    tmp_path.replace(final_path)
 
 
-def _parse_json_response(text: str) -> dict:
+def _parse_json_response(text: str, judge_type: str) -> dict:
     """Judge prompts ask for a bare JSON object. Models occasionally wrap it
     in a code fence anyway, so strip that defensively before parsing.
+
+    FIX (review #2): previously this let json.JSONDecodeError / KeyError
+    propagate straight out of _call_judge with no context, crashing the
+    whole run_pattern() loop on one bad judge response. Now it raises a
+    JudgeParseError naming the judge type and the raw text, which
+    evals/run.py catches per-question instead of losing the entire run.
     """
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -62,13 +101,20 @@ def _parse_json_response(text: str) -> dict:
         if stripped.lower().startswith("json"):
             stripped = stripped[4:]
         stripped = stripped.strip()
-    return json.loads(stripped)
+    try:
+        parsed = json.loads(stripped)
+        return {"score": float(parsed["score"]), "reasoning": str(parsed["reasoning"])}
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise JudgeParseError(
+            f"{judge_type} judge returned unparseable response: {exc}. Raw text: {text!r}"
+        ) from exc
 
 
 def _call_judge(
     llm: LLM, judge_type: str, prompt_file: str, prompt_vars: dict, cache_fields: dict
 ) -> JudgeResult:
-    key = _cache_key(judge_type, **cache_fields)
+    template = _load_prompt(prompt_file)
+    key = _cache_key(judge_type, prompt_template=template, **cache_fields)
     cached = _read_cache(key)
     if cached is not None:
         return JudgeResult(
@@ -78,17 +124,18 @@ def _call_judge(
             from_cache=True,
         )
 
-    template = _load_prompt(prompt_file)
     prompt = template.format(**prompt_vars)
     response = llm.complete(prompt=prompt, model=JUDGE_MODEL, temperature=0.0)
-    parsed = _parse_json_response(response.text)
+    # May raise JudgeParseError -- intentionally not caught here, so the
+    # caller (evals/run.py) can decide how to handle a bad judge response
+    # per-question instead of this module silently swallowing it.
+    result = _parse_json_response(response.text, judge_type)
     usd = cost_usd(
         JUDGE_MODEL,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cached_input_tokens=response.cached_input_tokens,
     )
-    result = {"score": float(parsed["score"]), "reasoning": str(parsed["reasoning"])}
     _write_cache(key, result)
     return JudgeResult(score=result["score"], reasoning=result["reasoning"], usd_cost=usd, from_cache=False)
 
