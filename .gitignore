@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# uv
+.uv/
+
+# Env / secrets
+.env
+.env.local
+
+# Project-specific caches and outputs (per SPEC.md)
+outputs/.judge_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
