@@ -1,3 +1,7 @@
+# Local-only build docs (not published to the public repo)
+SKILL.md
+SPEC.md
+
 # Python
 __pycache__/
 *.py[cod]
