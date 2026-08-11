@@ -1,0 +1,12 @@
+You are grading whether the inline citations in an AI-generated answer are accurate. Each citation in the answer is a chunk ID in square brackets, like [chunk_id], placed after a claim. A citation is accurate if the chunk it points to actually contains information supporting the claim it's attached to.
+
+Retrieved chunks (chunk_id followed by its text):
+{chunks_with_ids}
+
+Answer to grade (contains inline [chunk_id] citations):
+{answer}
+
+Respond with ONLY a JSON object, no other text, in exactly this shape:
+{{"score": <fraction between 0 and 1>, "reasoning": "<one sentence explaining the score>"}}
+
+Score is the fraction of citations in the answer that are accurate (chunk actually supports the claim next to it). If the answer has no citations at all, score 0 and say so in the reasoning. If the answer correctly makes no claims requiring citation (e.g. it says "I don't have enough information"), score 1.

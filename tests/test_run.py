@@ -1,0 +1,159 @@
+"""End-to-end proof of the P1 acceptance criterion (SPEC.md §18):
+
+    "evals/run.py can score a dummy retrieval function end to end and
+    print all metrics with CIs."
+
+Uses a dummy retrieval function (trivial keyword overlap, not a real
+pattern) and MockLLM wired in as BOTH the generation and judge backend, so
+this test proves the full run_pattern() orchestration -- retrieval metrics
+AND judge-derived metrics -- with zero real API calls (SPEC.md R8).
+"""
+
+from recipes import AnswerWithCitations
+from recipes.llm import MockLLM
+from evals.run import run_pattern
+
+FIXTURE_CORPUS = {
+    "c1": {
+        "chunk_id": "c1",
+        "text": "Speculative decoding uses a small draft model to propose "
+        "tokens that a larger model verifies in parallel, reducing latency.",
+    },
+    "c2": {
+        "chunk_id": "c2",
+        "text": "Convolutional neural networks are widely used for image "
+        "classification tasks.",
+    },
+    "c3": {
+        "chunk_id": "c3",
+        "text": "Reinforcement learning from human feedback aligns language "
+        "model outputs with human preferences.",
+    },
+}
+
+FIXTURE_QA_SET = [
+    {
+        "qid": "q1",
+        "category": "keyword",
+        "question": "What is speculative decoding?",
+        "relevant_chunk_ids": ["c1"],
+        "reference_answer": "A technique using a draft model to speed up inference.",
+        "requires_filter": None,
+    },
+    {
+        "qid": "q2",
+        "category": "keyword",
+        "question": "What are CNNs used for?",
+        "relevant_chunk_ids": ["c2"],
+        "reference_answer": "Image classification.",
+        "requires_filter": None,
+    },
+]
+
+
+def _dummy_pattern_factory():
+    """A trivial retrieval function: ranks fixture chunks by naive keyword
+    overlap with the question. Not a real pattern -- exists only to drive
+    run_pattern() end to end for this test.
+    """
+    gen_llm = MockLLM(default_response="This is a test answer. [c1]")
+
+    def dummy_pattern(question: str, k: int = 5) -> AnswerWithCitations:
+        q_words = set(question.lower().split())
+        scored = []
+        for chunk_id, chunk in FIXTURE_CORPUS.items():
+            overlap = len(q_words & set(chunk["text"].lower().split()))
+            scored.append((overlap, chunk_id))
+        scored.sort(reverse=True)
+        retrieved = [cid for _, cid in scored[:k]]
+
+        response = gen_llm.complete(
+            prompt=f"Answer using context: {question}",
+            model="gpt-4.1-mini-2025-04-14",
+        )
+        return AnswerWithCitations(
+            answer=response.text,
+            retrieved_chunk_ids=retrieved,
+            latency_ms=response.latency_ms,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cached_input_tokens=response.cached_input_tokens,
+        )
+
+    return dummy_pattern
+
+
+def test_run_pattern_end_to_end_with_judges(capsys):
+    dummy_pattern = _dummy_pattern_factory()
+    judge_llm = MockLLM(
+        default_response='{"score": 1, "reasoning": "looks fine"}'
+    )
+
+    result = run_pattern(
+        recipe_fn=dummy_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=judge_llm,
+        pattern_name="dummy",
+        judges_enabled=True,
+        k=3,
+        verbose=True,
+    )
+
+    assert result.n_questions == 2
+
+    # Retrieval metrics: q1 should hit (c1 is top by keyword overlap).
+    assert result.hit_at_3.mean > 0.0
+    assert result.hit_at_10.mean > 0.0
+    assert result.mrr.mean > 0.0
+    assert result.hit_at_3.lower <= result.hit_at_3.mean <= result.hit_at_3.upper
+
+    # Judge-derived metrics: this is the part a retrieval-only test would
+    # miss. MockLLM returns score=1 for every judge call, so these must be
+    # populated and equal to 1.0, not None.
+    assert result.faithfulness is not None
+    assert result.faithfulness.mean == 1.0
+    assert result.answer_relevance is not None
+    assert result.answer_relevance.mean == 1.0
+    assert result.citation_accuracy is not None
+    assert result.citation_accuracy.mean == 1.0
+
+    # No filter-dependent questions in this fixture set.
+    assert result.filter_accuracy is None
+
+    # Cost and latency are computed, not just present as zeros by accident.
+    assert result.usd_per_query > 0.0
+    assert result.eval_usd > 0.0
+    assert result.p50_latency_ms >= 0.0
+
+    # "print all metrics with CIs" -- verify the printed summary actually
+    # names every metric, per the literal wording of the P1 acceptance
+    # criterion.
+    printed = capsys.readouterr().out
+    for label in [
+        "hit@3",
+        "hit@10",
+        "mrr",
+        "faithfulness",
+        "answer_relevance",
+        "citation_accuracy",
+        "95% CI",
+    ]:
+        assert label in printed
+
+
+def test_run_pattern_judges_disabled_are_none():
+    dummy_pattern = _dummy_pattern_factory()
+    result = run_pattern(
+        recipe_fn=dummy_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(),
+        judges_enabled=False,
+        verbose=False,
+    )
+    assert result.faithfulness is None
+    assert result.answer_relevance is None
+    assert result.citation_accuracy is None
+    # Retrieval metrics still work without judges.
+    assert result.hit_at_3.mean >= 0.0

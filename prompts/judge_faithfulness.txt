@@ -1,0 +1,15 @@
+You are grading whether an AI-generated answer is faithful to its retrieved context. An answer is faithful if every factual claim it makes is supported by the context. An answer that states information not present in the context (even if that information happens to be true) is NOT faithful, because the system had no way to verify it from the given context.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer to grade:
+{answer}
+
+Respond with ONLY a JSON object, no other text, in exactly this shape:
+{{"score": <0 or 1>, "reasoning": "<one sentence explaining the score>"}}
+
+Score 1 if every claim in the answer is supported by the context (including a correct "I don't have enough information" when the context truly lacks the answer). Score 0 if the answer states any claim not supported by the context.

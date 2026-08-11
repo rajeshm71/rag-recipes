@@ -1,0 +1,193 @@
+"""Eval harness orchestrator. Scores one RAG pattern's recipe function
+against the eval set and returns every metric from SPEC.md §5, each with a
+95% bootstrap confidence interval.
+
+This is the file whose behavior is the literal P1 acceptance criterion
+(SPEC.md §18): "evals/run.py can score a dummy retrieval function end to
+end and print all metrics with CIs."
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+from evals.judges import (
+    judge_answer_relevance,
+    judge_citation_accuracy,
+    judge_faithfulness,
+)
+from evals.metrics import (
+    ConfidenceInterval,
+    bootstrap_ci,
+    filter_accuracy,
+    hit_at_k,
+    latency_percentiles,
+    mrr,
+)
+from recipes import AnswerWithCitations
+from recipes.llm import LLM
+from recipes.pricing import cost_usd
+
+GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"
+
+
+@dataclass
+class PatternResult:
+    pattern_name: str
+    n_questions: int
+    hit_at_3: ConfidenceInterval
+    hit_at_10: ConfidenceInterval
+    mrr: ConfidenceInterval
+    faithfulness: ConfidenceInterval | None
+    answer_relevance: ConfidenceInterval | None
+    citation_accuracy: ConfidenceInterval | None
+    filter_accuracy: ConfidenceInterval | None
+    p50_latency_ms: float
+    p95_latency_ms: float
+    usd_per_query: float
+    eval_usd: float
+
+
+def load_qa_set(path: str | Path) -> list[dict]:
+    records = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return records
+
+
+def load_corpus_by_id(path: str | Path) -> dict[str, dict]:
+    by_id: dict[str, dict] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                chunk = json.loads(line)
+                by_id[chunk["chunk_id"]] = chunk
+    return by_id
+
+
+def _build_context(chunk_ids: list[str], corpus_by_id: dict[str, dict]) -> str:
+    parts = []
+    for cid in chunk_ids:
+        chunk = corpus_by_id.get(cid)
+        if chunk is not None:
+            parts.append(f"[{cid}] {chunk['text']}")
+    return "\n\n".join(parts)
+
+
+def run_pattern(
+    recipe_fn: Callable[..., AnswerWithCitations],
+    qa_set: list[dict],
+    corpus_by_id: dict[str, dict],
+    llm: LLM,
+    pattern_name: str = "pattern",
+    generation_model: str = GENERATION_MODEL,
+    judges_enabled: bool = True,
+    k: int = 10,
+    verbose: bool = True,
+) -> PatternResult:
+    """Run `recipe_fn` over every question in `qa_set`, score it against
+    every metric in SPEC.md §5, and return the aggregated result.
+
+    `recipe_fn` must match the AnswerWithCitations contract from
+    recipes/__init__.py: `recipe_fn(question: str, k: int) -> AnswerWithCitations`.
+    """
+    hit3_scores: list[float] = []
+    hit10_scores: list[float] = []
+    mrr_scores: list[float] = []
+    faithfulness_scores: list[float] = []
+    relevance_scores: list[float] = []
+    citation_scores: list[float] = []
+    filter_scores: list[float] = []
+    latencies: list[float] = []
+    generation_usd_total = 0.0
+    judge_usd_total = 0.0
+
+    for record in qa_set:
+        question = record["question"]
+        relevant_ids = record["relevant_chunk_ids"]
+        requires_filter = record.get("requires_filter")
+
+        result = recipe_fn(question, k=k)
+
+        hit3_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 3))
+        hit10_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 10))
+        mrr_scores.append(mrr(result.retrieved_chunk_ids, relevant_ids))
+        latencies.append(result.latency_ms)
+
+        generation_usd_total += cost_usd(
+            generation_model,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cached_input_tokens=result.cached_input_tokens,
+        )
+
+        fa = filter_accuracy(result.extracted_filter, requires_filter)
+        if fa is not None:
+            filter_scores.append(fa)
+
+        if judges_enabled:
+            context = _build_context(result.retrieved_chunk_ids, corpus_by_id)
+
+            fr = judge_faithfulness(llm, question, context, result.answer)
+            faithfulness_scores.append(fr.score)
+            judge_usd_total += fr.usd_cost
+
+            rr = judge_answer_relevance(llm, question, result.answer)
+            relevance_scores.append(rr.score)
+            judge_usd_total += rr.usd_cost
+
+            cr = judge_citation_accuracy(llm, context, result.answer)
+            citation_scores.append(cr.score)
+            judge_usd_total += cr.usd_cost
+
+    p50, p95 = latency_percentiles(latencies)
+    n = len(qa_set)
+    total_usd = generation_usd_total + judge_usd_total
+
+    pattern_result = PatternResult(
+        pattern_name=pattern_name,
+        n_questions=n,
+        hit_at_3=bootstrap_ci(hit3_scores),
+        hit_at_10=bootstrap_ci(hit10_scores),
+        mrr=bootstrap_ci(mrr_scores),
+        faithfulness=bootstrap_ci(faithfulness_scores) if judges_enabled else None,
+        answer_relevance=bootstrap_ci(relevance_scores) if judges_enabled else None,
+        citation_accuracy=bootstrap_ci(citation_scores) if judges_enabled else None,
+        filter_accuracy=bootstrap_ci(filter_scores) if filter_scores else None,
+        p50_latency_ms=p50,
+        p95_latency_ms=p95,
+        usd_per_query=total_usd / n if n else 0.0,
+        eval_usd=total_usd,
+    )
+
+    if verbose:
+        print_result(pattern_result)
+
+    return pattern_result
+
+
+def print_result(result: PatternResult) -> None:
+    def fmt_ci(name: str, ci: ConfidenceInterval | None) -> str:
+        if ci is None:
+            return f"  {name}: (not computed)"
+        return f"  {name}: {ci.mean:.3f}  [95% CI {ci.lower:.3f}, {ci.upper:.3f}]"
+
+    print(f"=== {result.pattern_name} (n={result.n_questions}) ===")
+    print(fmt_ci("hit@3", result.hit_at_3))
+    print(fmt_ci("hit@10", result.hit_at_10))
+    print(fmt_ci("mrr", result.mrr))
+    print(fmt_ci("faithfulness", result.faithfulness))
+    print(fmt_ci("answer_relevance", result.answer_relevance))
+    print(fmt_ci("citation_accuracy", result.citation_accuracy))
+    print(fmt_ci("filter_accuracy", result.filter_accuracy))
+    print(f"  p50_latency_ms: {result.p50_latency_ms:.1f}")
+    print(f"  p95_latency_ms: {result.p95_latency_ms:.1f}")
+    print(f"  usd_per_query: ${result.usd_per_query:.5f}")
+    print(f"  eval_usd: ${result.eval_usd:.4f}")

@@ -1,0 +1,12 @@
+You are grading whether an AI-generated answer actually addresses the question asked, regardless of whether the answer is factually correct. An answer can be faithful to its context yet still fail to address the question (e.g. it answers a related but different question, or gives only a partial answer to a multi-part question).
+
+Question:
+{question}
+
+Answer to grade:
+{answer}
+
+Respond with ONLY a JSON object, no other text, in exactly this shape:
+{{"score": <0 or 1>, "reasoning": "<one sentence explaining the score>"}}
+
+Score 1 if the answer directly and completely addresses what was asked. Score 0 if it does not address the question, only partially addresses it, or answers a different question than the one asked.

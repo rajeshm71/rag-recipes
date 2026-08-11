@@ -1,6 +1,7 @@
 # Local-only build docs (not published to the public repo)
 SKILL.md
 SPEC.md
+tasks/
 
 # Python
 __pycache__/

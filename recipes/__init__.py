@@ -1,0 +1,34 @@
+"""Shared contract every pattern recipe (recipes/<pattern>.py) implements.
+
+Per SPEC.md §16.3, each pattern module exposes:
+
+    def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations
+
+This lives in recipes/__init__.py rather than a pattern-specific file
+because it's the interface the eval harness (evals/run.py) and every
+pattern module both depend on.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class AnswerWithCitations:
+    answer: str
+    retrieved_chunk_ids: list[str]
+    latency_ms: float
+    input_tokens: int
+    output_tokens: int
+    cached_input_tokens: int = 0
+    # Only populated by pattern 08 (self-query); the filter the pattern
+    # extracted from the question, for comparison against qa_set.jsonl's
+    # `requires_filter` ground truth.
+    extracted_filter: dict | None = None
+    # Only populated by pattern 10 (agentic); logged to
+    # outputs/agentic_traces.jsonl per SPEC.md §6.
+    tool_call_trace: list[dict] = field(default_factory=list)
+
+
+__all__ = ["AnswerWithCitations"]
