@@ -1,0 +1,6 @@
+You are helping search a document corpus. Rewrite the following question as up to 3 alternative search queries that together cover different phrasings or sub-aspects of what's being asked. Simple, unambiguous questions may need only 1.
+
+Question: {question}
+
+Respond with ONLY a JSON object, no other text, in exactly this shape:
+{{"queries": ["<query 1>", "<query 2>", "<query 3>"]}}

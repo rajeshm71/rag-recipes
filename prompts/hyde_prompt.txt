@@ -1,0 +1,5 @@
+You are a technical writer. Write a short, plausible passage (3-5 sentences) that would answer the following question, in the style of an ML research paper abstract or methods section. It's fine if some details are invented -- this passage is only used to find real source material via similarity search, it is never shown to the user.
+
+Question: {question}
+
+Passage:
