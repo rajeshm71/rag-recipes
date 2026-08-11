@@ -187,3 +187,87 @@ def test_run_pattern_isolates_a_failing_question(capsys):
 
     printed = capsys.readouterr().err
     assert "failed and was skipped" in printed
+
+
+def test_run_pattern_keeps_retrieval_scores_when_only_judging_fails(capsys):
+    """Regression test for a bug found while building 02_bm25.ipynb (P2):
+    a judge-call failure must NOT discard the retrieval scores for that
+    same question -- retrieval already succeeded and is real, valid data.
+    Previously a judge failure was folded into the same n_errors/"failed
+    and was skipped" path as a recipe_fn failure, which was both wrong
+    (real data thrown away) and misleading (the message implied nothing
+    was captured for that question, when hit@k/mrr were).
+    """
+    dummy_pattern = _dummy_pattern_factory()
+    # Not valid JSON -- every judge call will raise JudgeParseError.
+    non_json_llm = MockLLM(default_response="This is a mock response.")
+
+    result = run_pattern(
+        recipe_fn=dummy_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=non_json_llm,
+        judges_enabled=True,
+        verbose=False,
+    )
+
+    # Recipe_fn never failed -- n_errors stays 0.
+    assert result.n_errors == 0
+    # Every question's judging failed -- n_judge_errors reflects that.
+    assert result.n_judge_errors == len(FIXTURE_QA_SET)
+    # Retrieval metrics are real and were NOT discarded by the judge failure.
+    assert result.n_questions == len(FIXTURE_QA_SET)
+    assert result.hit_at_3.mean > 0.0
+    # Judge-derived metrics are empty (bootstrap_ci's empty-list default),
+    # since every judge call failed to parse.
+    assert result.faithfulness.mean == 0.0
+
+    printed = capsys.readouterr().err
+    assert "retrieval succeeded but judging failed" in printed
+    assert "failed and was skipped (no retrieval data)" not in printed
+
+
+def test_run_pattern_keeps_retrieval_scores_when_only_accounting_fails(capsys):
+    """Regression test for a bug found in code review: cost_usd() and
+    filter_accuracy() ran in the SAME try block as the hit@k/mrr/latency
+    appends, so a cost-accounting failure (e.g. an unpriced generation
+    model) would print "no retrieval data" even though retrieval scores
+    for that question were already appended and kept. Same bug shape as
+    the judge-error split above, applied to the accounting step.
+    """
+    dummy_pattern = _dummy_pattern_factory()
+
+    result = run_pattern(
+        recipe_fn=dummy_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(default_response='{"score": 1, "reasoning": "fine"}'),
+        # Not a real priced model -- cost_usd() raises ValueError for this,
+        # deliberately, to exercise the accounting-error path. recipe_fn's
+        # own internal llm.complete() call is unaffected (MockLLM doesn't
+        # care about pricing), so retrieval itself still succeeds.
+        generation_model="totally-unpriced-model-xyz",
+        judges_enabled=True,
+        verbose=False,
+    )
+
+    # Recipe_fn never failed -- n_errors stays 0.
+    assert result.n_errors == 0
+    # Cost accounting failed for every question.
+    assert result.n_accounting_errors == len(FIXTURE_QA_SET)
+    # Retrieval metrics are real and were NOT discarded by the accounting failure.
+    assert result.n_questions == len(FIXTURE_QA_SET)
+    assert result.hit_at_3.mean > 0.0
+    # Judging still ran fine (independent of accounting) since it doesn't
+    # depend on cost_usd() succeeding -- and judge cost IS counted in
+    # eval_usd (judges have their own cost_usd() call, unaffected by this
+    # question's generation-cost failure), so eval_usd is small but not
+    # exactly zero. What's understated is specifically the generation-cost
+    # contribution, not the total.
+    assert result.faithfulness.mean == 1.0
+    assert result.eval_usd > 0.0  # judge cost alone
+    assert result.eval_usd < 0.01  # sanity: nowhere near what generation cost would add
+
+    printed = capsys.readouterr().err
+    assert "retrieval succeeded but cost/filter accounting failed" in printed
+    assert "failed and was skipped (no retrieval data)" not in printed
