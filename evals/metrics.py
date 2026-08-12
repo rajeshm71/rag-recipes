@@ -37,6 +37,20 @@ def mrr(retrieved_ids: list[str], relevant_ids: list[str]) -> float:
     return 0.0
 
 
+def paper_hit_at_k(
+    retrieved_ids: list[str], relevant_paper_ids: set[str], corpus_by_id: dict[str, dict], k: int
+) -> float:
+    """Coarser than hit_at_k: 1.0 if ANY of the top-k retrieved chunks
+    belongs to one of the relevant PAPERS (not necessarily the exact
+    ground-truth CHUNK). Needed for A1/A2 (SPEC.md §7): re-chunking the
+    corpus produces entirely different chunk_ids, so qa_set.jsonl's
+    relevant_chunk_ids can't be matched exactly across chunking variants --
+    paper_id is the one thing stable across every strategy.
+    """
+    top_k_papers = {corpus_by_id[cid]["paper_id"] for cid in retrieved_ids[:k] if cid in corpus_by_id}
+    return 1.0 if top_k_papers & relevant_paper_ids else 0.0
+
+
 def filter_accuracy(extracted_filter: dict | None, requires_filter: dict | None) -> float | None:
     """For pattern 08 (self-query): 1.0 if the extracted filter exactly
     matches the ground-truth filter, else 0.0. Returns None if the question

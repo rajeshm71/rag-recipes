@@ -141,38 +141,50 @@ def _split_paragraphs(text: str) -> list[str]:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
-def _split_oversized_paragraph(para: str, tokenizer) -> list[str]:
+def _split_oversized_paragraph(
+    para: str, tokenizer, chunk_tokens: int = CHUNK_TOKENS, overlap_tokens: int = CHUNK_OVERLAP_TOKENS
+) -> list[str]:
     """Token-level fallback for a single paragraph that alone exceeds
-    CHUNK_TOKENS. PDF text extraction frequently loses blank-line breaks
+    chunk_tokens. PDF text extraction frequently loses blank-line breaks
     (an entire page can come back as one "paragraph"), so paragraph-only
     splitting is not sufficient on its own -- without this fallback, chunks
-    silently blow past the 512-token target from SPEC.md §4.
+    silently blow past the target from SPEC.md §4.
+
+    chunk_tokens/overlap_tokens default to the module constants (P1's
+    fixed 512/64 policy for the main corpus); P5's A1_chunking_study.ipynb
+    passes different values to build the fixed-256/512/1024 variants --
+    see corpus/chunking_strategies.py.
     """
     tokens = tokenizer.encode(para)
-    if len(tokens) <= CHUNK_TOKENS:
+    if len(tokens) <= chunk_tokens:
         return [para]
 
     pieces = []
     start = 0
-    step = CHUNK_TOKENS - CHUNK_OVERLAP_TOKENS
+    step = chunk_tokens - overlap_tokens
     while start < len(tokens):
-        piece_tokens = tokens[start : start + CHUNK_TOKENS]
+        piece_tokens = tokens[start : start + chunk_tokens]
         pieces.append(tokenizer.decode(piece_tokens))
         start += step
     return pieces
 
 
-def chunk_text(text: str, tokenizer) -> list[str]:
-    """Paragraph-boundary-aware chunking to ~CHUNK_TOKENS tokens per chunk,
-    with CHUNK_OVERLAP_TOKENS of trailing overlap carried into the next
-    chunk. Paragraphs that individually exceed CHUNK_TOKENS are split at
-    the token level as a fallback (see _split_oversized_paragraph).
+def chunk_text(
+    text: str, tokenizer, chunk_tokens: int = CHUNK_TOKENS, overlap_tokens: int = CHUNK_OVERLAP_TOKENS
+) -> list[str]:
+    """Paragraph-boundary-aware chunking to ~chunk_tokens tokens per chunk,
+    with overlap_tokens of trailing overlap carried into the next chunk.
+    Paragraphs that individually exceed chunk_tokens are split at the
+    token level as a fallback (see _split_oversized_paragraph).
+
+    chunk_tokens/overlap_tokens default to the module constants; see
+    _split_oversized_paragraph's docstring for why they're parametrized.
     """
     raw_paragraphs = _split_paragraphs(text)
     # Expand any paragraph too big to fit in one chunk on its own.
     paragraphs: list[str] = []
     for para in raw_paragraphs:
-        paragraphs.extend(_split_oversized_paragraph(para, tokenizer))
+        paragraphs.extend(_split_oversized_paragraph(para, tokenizer, chunk_tokens, overlap_tokens))
 
     chunks: list[str] = []
     current_paragraphs: list[str] = []
@@ -184,17 +196,17 @@ def chunk_text(text: str, tokenizer) -> list[str]:
 
     for para in paragraphs:
         para_tokens = len(tokenizer.encode(para))
-        if current_tokens + para_tokens > CHUNK_TOKENS and current_paragraphs:
+        if current_tokens + para_tokens > chunk_tokens and current_paragraphs:
             flush()
             # Carry the tail of the previous chunk forward as overlap.
             overlap_text = current_paragraphs[-1]
-            overlap_tokens = len(tokenizer.encode(overlap_text))
-            if overlap_tokens > CHUNK_OVERLAP_TOKENS:
+            overlap_tok_count = len(tokenizer.encode(overlap_text))
+            if overlap_tok_count > overlap_tokens:
                 current_paragraphs = []
                 current_tokens = 0
             else:
                 current_paragraphs = [overlap_text]
-                current_tokens = overlap_tokens
+                current_tokens = overlap_tok_count
         current_paragraphs.append(para)
         current_tokens += para_tokens
 

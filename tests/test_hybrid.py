@@ -1,7 +1,7 @@
 from recipes.bm25 import BM25Index
 from recipes.dense_index import build_dense_index, dense_search
 from recipes.embeddings import MockEmbedder
-from recipes.hybrid import make_retrieve_and_answer
+from recipes.hybrid import make_retrieve_and_answer, rrf_fuse
 from recipes.llm import MockLLM
 
 FIXTURE_CORPUS = {
@@ -100,3 +100,26 @@ def test_rrf_k_is_wired_into_the_fusion_formula():
     actual_order = fn(question, k=5).retrieved_chunk_ids
 
     assert actual_order == expected_order
+
+
+def test_rrf_fuse_is_genuinely_n_ary():
+    # P5: rrf_fuse was extracted from this file's inline fusion loop for
+    # reuse by recipes/hybrid_rerank.py (A1/A2 appendices). This pattern's
+    # own usage only ever passes 2 lists, but the function itself must not
+    # assume that -- verify a 3-list fusion combines all three properly.
+    list_a = ["c1", "c2", "c3"]
+    list_b = ["c3", "c1", "c2"]
+    list_c = ["c2", "c3", "c1"]
+
+    result = rrf_fuse([list_a, list_b, list_c], k=3, rrf_k=60)
+
+    # Every chunk appears in every list, just at different ranks -- all
+    # three must survive fusion (none dropped), and the result must be a
+    # genuine permutation of the three ids, not e.g. just list_a unchanged.
+    assert set(result) == {"c1", "c2", "c3"}
+    assert len(result) == 3
+
+
+def test_rrf_fuse_respects_k():
+    result = rrf_fuse([["c1", "c2", "c3"], ["c3", "c2", "c1"]], k=2, rrf_k=60)
+    assert len(result) == 2

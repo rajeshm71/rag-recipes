@@ -23,6 +23,21 @@ RRF_K = 60  # standard literature default
 CANDIDATES_PER_RANKER = 20
 
 
+def rrf_fuse(ranked_lists: list[list[str]], k: int, rrf_k: int = RRF_K) -> list[str]:
+    """Reciprocal Rank Fusion over any number of ranked chunk_id lists.
+
+    Extracted from make_retrieve_and_answer's inline fusion loop (P5) so
+    recipes/hybrid_rerank.py (used by the A1/A2 appendix studies) can reuse
+    the exact same fusion math instead of duplicating it.
+    """
+    scores: dict[str, float] = {}
+    for ranked in ranked_lists:
+        for rank, cid in enumerate(ranked, start=1):
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
+    fused = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
+    return [cid for cid, _ in fused[:k]]
+
+
 def make_retrieve_and_answer(
     corpus_by_id: dict[str, dict],
     embedder: Embedder,
@@ -49,14 +64,7 @@ def make_retrieve_and_answer(
         )
         bm25_ids = [r.chunk_id for r in bm25_index.search(question, candidates_per_ranker)]
 
-        rrf_scores: dict[str, float] = {}
-        for rank, cid in enumerate(dense_ids, start=1):
-            rrf_scores[cid] = rrf_scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
-        for rank, cid in enumerate(bm25_ids, start=1):
-            rrf_scores[cid] = rrf_scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
-
-        fused = sorted(rrf_scores.items(), key=lambda pair: pair[1], reverse=True)
-        retrieved_ids = [cid for cid, _ in fused[:k]]
+        retrieved_ids = rrf_fuse([dense_ids, bm25_ids], k, rrf_k)
 
         context = "\n\n".join(
             f"[{cid}] {corpus_by_id[cid]['text']}"

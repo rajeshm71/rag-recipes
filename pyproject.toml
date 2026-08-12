@@ -13,13 +13,16 @@ dependencies = [
     "python-dotenv>=1.0",
     "sentence-transformers>=3.0",
     "anthropic>=0.121",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
 # Only needed to rebuild corpus/corpus.jsonl from scratch. Not required to run
 # the pattern notebooks, so kept out of the default `uv sync` install.
+# requests is NOT listed here -- it moved to main dependencies in P5 (needed
+# by recipes/embeddings.py's VoyageEmbedder, a REST call, not the voyageai
+# SDK -- see that module's docstring for why).
 corpus-build = [
-    "requests>=2.31",
     "pypdf>=4.0",
     "tiktoken>=0.7",
 ]

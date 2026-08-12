@@ -1,4 +1,17 @@
-from evals.metrics import bootstrap_ci, filter_accuracy, hit_at_k, latency_percentiles, mrr
+from evals.metrics import (
+    bootstrap_ci,
+    filter_accuracy,
+    hit_at_k,
+    latency_percentiles,
+    mrr,
+    paper_hit_at_k,
+)
+
+PAPER_CORPUS = {
+    "arxiv:1#0": {"chunk_id": "arxiv:1#0", "paper_id": "arxiv:1"},
+    "arxiv:1#1": {"chunk_id": "arxiv:1#1", "paper_id": "arxiv:1"},
+    "arxiv:2#0": {"chunk_id": "arxiv:2#0", "paper_id": "arxiv:2"},
+}
 
 
 def test_hit_at_k_hit():
@@ -24,6 +37,27 @@ def test_mrr_third_position():
 
 def test_mrr_not_found():
     assert mrr(["a", "b", "c"], ["z"]) == 0.0
+
+
+def test_paper_hit_at_k_hit():
+    # Retrieved chunk_id is a DIFFERENT id than any relevant_chunk_id, but
+    # shares the same paper_id -- this is the exact case the metric exists
+    # for (re-chunked corpora produce entirely new chunk_ids).
+    assert paper_hit_at_k(["arxiv:1#1"], {"arxiv:1"}, PAPER_CORPUS, k=3) == 1.0
+
+
+def test_paper_hit_at_k_miss():
+    assert paper_hit_at_k(["arxiv:2#0"], {"arxiv:1"}, PAPER_CORPUS, k=3) == 0.0
+
+
+def test_paper_hit_at_k_respects_k():
+    assert paper_hit_at_k(["arxiv:2#0", "arxiv:1#0"], {"arxiv:1"}, PAPER_CORPUS, k=1) == 0.0
+
+
+def test_paper_hit_at_k_ignores_ids_not_in_corpus_by_id():
+    # A chunk_id not present in corpus_by_id (shouldn't normally happen,
+    # but must not crash) is simply skipped, not treated as a match.
+    assert paper_hit_at_k(["not-a-real-chunk-id"], {"arxiv:1"}, PAPER_CORPUS, k=3) == 0.0
 
 
 def test_filter_accuracy_none_when_not_required():
