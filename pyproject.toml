@@ -47,5 +47,17 @@ packages = ["recipes", "evals"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+# BLE001 (blind except) is intentionally NOT enforced: this project uses
+# broad `except Exception` deliberately and consistently as a resilience
+# policy -- evals/run.py's per-question error isolation, and every
+# recipes/*.py defensive JSON parser (multi_query/self_query/multi_hop/
+# agentic's `_parse_*` functions) -- "any single failure degrades
+# gracefully rather than crashing the whole run." See CLAUDE.md's
+# Anti-Patterns section and the individual `# noqa: BLE001` comments this
+# rule replaces in evals/run.py. Everything else stays at ruff's default
+# selection.
+ignore = ["BLE001"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

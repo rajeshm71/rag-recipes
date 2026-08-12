@@ -11,9 +11,9 @@ AND judge-derived metrics -- with zero real API calls (SPEC.md R8).
 
 import json
 
+from evals.run import run_pattern
 from recipes import AnswerWithCitations
 from recipes.llm import MockLLM
-from evals.run import run_pattern
 
 FIXTURE_CORPUS = {
     "c1": {

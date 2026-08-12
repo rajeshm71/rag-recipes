@@ -6,8 +6,8 @@ always, at roughly 2x the retrieval cost of a single ranker.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from recipes import AnswerWithCitations
 from recipes.bm25 import BM25Index

@@ -65,11 +65,11 @@ class OpenAILLM:
         cacheable_prefix: str | None = None,  # no-op: see LLM Protocol docstring
     ) -> LLMResponse:
         start = time.perf_counter()
-        base_kwargs = dict(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=max_tokens,
-        )
+        base_kwargs = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_completion_tokens": max_tokens,
+        }
         try:
             response = self._client.chat.completions.create(
                 **base_kwargs, temperature=temperature
@@ -221,12 +221,12 @@ class AnthropicLLM:
         cacheable_prefix: str | None = None,
     ) -> LLMResponse:
         start = time.perf_counter()
-        kwargs = dict(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        kwargs = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": prompt}],
+        }
         if cacheable_prefix:
             kwargs["system"] = [
                 {"type": "text", "text": cacheable_prefix, "cache_control": {"type": "ephemeral"}}

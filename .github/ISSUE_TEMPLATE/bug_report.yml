@@ -1,0 +1,39 @@
+name: Bug report
+description: Something is broken -- a metric looks wrong, a notebook fails to run, a link is dead
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you actually see?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands run, notebook cell, or code snippet.
+      placeholder: |
+        1. uv sync
+        2. jupyter lab notebooks/03_hybrid_rrf.ipynb
+        3. Run all cells
+        4. Section 5 raises ...
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, `RAG_RECIPES_LLM` setting (mock or openai)
+      placeholder: "macOS 14, Python 3.12, RAG_RECIPES_LLM=mock"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output / traceback
+      render: shell
+    validations:
+      required: false

@@ -9,9 +9,10 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from recipes import AnswerWithCitations
 from recipes.bm25 import BM25Index

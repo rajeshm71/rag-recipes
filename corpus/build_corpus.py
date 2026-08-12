@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -124,9 +123,10 @@ def search_arxiv(
 
 
 def download_pdf_text(pdf_url: str) -> str:
+    import io
+
     import requests
     from pypdf import PdfReader
-    import io
 
     resp = requests.get(pdf_url, timeout=60)
     resp.raise_for_status()
@@ -269,7 +269,6 @@ def build_corpus(
 
             raw_chunks = chunk_text(text, tokenizer)
             kept = raw_chunks[:MAX_CHUNKS_PER_PAPER]
-            total_paragraphs = len(_split_paragraphs(text))
 
             for i, chunk_text_str in enumerate(kept):
                 n_tokens = len(tokenizer.encode(chunk_text_str))
@@ -308,8 +307,7 @@ def build_corpus(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
-        for chunk in all_chunks:
-            f.write(json.dumps(chunk) + "\n")
+        f.writelines(json.dumps(chunk) + "\n" for chunk in all_chunks)
 
     print()
     print(f"Done. Papers used: {papers_used}, skipped: {papers_skipped}, "

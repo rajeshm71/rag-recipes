@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run python scripts/lint_notebooks.py
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run pytest tests/
+
+  notebooks-smoke:
+    runs-on: ubuntu-latest
+    env:
+      # R8: CI is mock-only. No real API key is ever referenced or needed
+      # as a secret for this job.
+      RAG_RECIPES_LLM: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9
+      - run: uv python install 3.12
+      # --extra corpus-build: A1_chunking_study.ipynb needs tiktoken to
+      # re-chunk the committed corpus/corpus_fulltext.jsonl; harmless
+      # (unused) for the other 14 notebooks.
+      - run: uv sync --extra corpus-build
+      - name: Cache HuggingFace models
+        # A2_embedding_swap.ipynb's LocalEmbedder (BAAI/bge-large-en-v1.5)
+        # is deliberately real, not gated by RAG_RECIPES_LLM=mock (P5's
+        # zero-API-key design) -- without this cache, every CI run would
+        # re-download a ~1.3GB-class model from HuggingFace.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-bge-large-en-v1.5
+      - name: Run every notebook
+        run: |
+          set -e
+          for nb in notebooks/*.ipynb; do
+            echo "=== $nb ==="
+            uv run papermill "$nb" "$nb" --cwd notebooks
+          done

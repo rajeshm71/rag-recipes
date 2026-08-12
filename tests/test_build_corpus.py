@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "corpus"))
 
-from build_corpus import CHUNK_TOKENS, chunk_text  # noqa: E402
+from build_corpus import CHUNK_TOKENS, chunk_text
 
 
 class _FakeTokenizer:

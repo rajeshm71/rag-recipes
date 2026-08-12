@@ -1,0 +1,43 @@
+name: New pattern proposal
+description: Propose a new RAG pattern not covered by the existing 10
+title: "[pattern]: "
+labels: ["new-pattern"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a new pattern. Please read `docs/adding_a_pattern.md` first --
+        it covers the required `recipes/<name>.py` contract and notebook template. Wait for
+        a maintainer nod here before writing code, to avoid wasted work.
+  - type: textarea
+    id: description
+    attributes:
+      label: What is the pattern?
+      description: Describe the retrieval/generation technique in a few sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: Why isn't this covered by the existing 10 patterns?
+      description: What's genuinely different about this approach, compared to what's already here?
+    validations:
+      required: true
+  - type: textarea
+    id: key-claim
+    attributes:
+      label: Key claim to test
+      description: >
+        What should this pattern win at, and what should it cost? (Matches the "Key claim to
+        test" column in SPEC.md §6's pattern table.)
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: This does not require a new top-level dependency, or I've explained why it does
+          required: false
+        - label: I've read docs/adding_a_pattern.md
+          required: true

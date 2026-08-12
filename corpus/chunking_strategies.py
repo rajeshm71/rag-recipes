@@ -46,7 +46,7 @@ def chunk_semantic(full_text: str, embedder, embedding_model: str, tokenizer) ->
     unit = vectors / np.clip(norms, 1e-9, None)
     sims = np.sum(unit[:-1] * unit[1:], axis=1)  # consecutive cosine similarities
     threshold = np.percentile(sims, SEMANTIC_BREAKPOINT_PERCENTILE)
-    breakpoints = set(int(i) for i in np.where(sims < threshold)[0])  # break AFTER sentence i
+    breakpoints = {int(i) for i in np.where(sims < threshold)[0]}  # break AFTER sentence i
 
     groups: list[list[str]] = [[]]
     for i, sentence in enumerate(sentences):

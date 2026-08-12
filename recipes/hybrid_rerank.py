@@ -8,7 +8,7 @@ score against the eval set via paper_hit_at_k.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from recipes.bm25 import BM25Index
 from recipes.dense_index import build_dense_index, dense_search

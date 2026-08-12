@@ -14,8 +14,8 @@ not "the generation step," so R4 does not apply to it.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from recipes import AnswerWithCitations
 from recipes.dense_index import build_dense_index, dense_search

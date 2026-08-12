@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from evals.judges import (
     judge_answer_relevance,
@@ -146,7 +146,13 @@ def run_pattern(
     # doesn't silently accumulate stale entries from a previous run -- same
     # "clean run" principle SPEC.md §19 Q4 already applies to every other
     # committed notebook output.
-    trace_file = open(trace_output_path, "w", encoding="utf-8") if trace_output_path is not None else None
+    # Can't use `with` here -- this must stay open across the whole
+    # per-question loop below; correctly closed in the `finally` block.
+    trace_file = (
+        open(trace_output_path, "w", encoding="utf-8")  # noqa: SIM115
+        if trace_output_path is not None
+        else None
+    )
     try:
         for record in qa_set:
             question = record["question"]
@@ -172,7 +178,7 @@ def run_pattern(
                 hit10_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 10))
                 mrr_scores.append(mrr(result.retrieved_chunk_ids, relevant_ids))
                 latencies.append(result.latency_ms)
-            except Exception as exc:  # noqa: BLE001 -- deliberately broad, see comment above
+            except Exception as exc:
                 n_errors += 1
                 print(f"  WARNING: question {qid!r} failed and was skipped (no retrieval data): {exc}", file=sys.stderr)
                 continue
@@ -208,7 +214,7 @@ def run_pattern(
                     trace_file.write(
                         json.dumps({"qid": qid, "question": question, "trace": result.tool_call_trace}) + "\n"
                     )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 n_accounting_errors += 1
                 print(f"  WARNING: question {qid!r} retrieval succeeded but cost/filter/trace "
                       f"accounting failed: {exc}", file=sys.stderr)
@@ -237,7 +243,7 @@ def run_pattern(
                 cr = judge_citation_accuracy(llm, context, result.answer)
                 citation_scores.append(cr.score)
                 judge_usd_total += cr.usd_cost
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 n_judge_errors += 1
                 print(f"  WARNING: question {qid!r} retrieval succeeded but judging failed: {exc}", file=sys.stderr)
     finally:

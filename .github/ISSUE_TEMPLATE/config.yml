@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and "which pattern should I use" discussions
+    url: https://github.com/rajeshm71/rag-recipes/discussions
+    about: For open-ended questions that aren't quite a bug report or a pattern proposal.
