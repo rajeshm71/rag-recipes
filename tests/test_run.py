@@ -368,6 +368,48 @@ def test_run_pattern_keeps_retrieval_scores_when_only_trace_write_fails(capsys, 
     assert "failed and was skipped (no retrieval data)" not in printed
 
 
+def test_run_pattern_prices_cache_creation_tokens():
+    """Regression test: AnswerWithCitations.cache_creation_input_tokens must
+    reach cost_usd() -- otherwise a pattern using Anthropic's cache-write
+    tier (e.g. pattern 07's contextualization, or any future per-question
+    call routed through AnthropicLLM) would silently underprice its cost by
+    the cache-write premium. Uses claude-sonnet-5, the one model in
+    recipes/pricing.py with a real cache_creation_per_1m rate
+    (2.50 USD/1M, vs 2.00 for plain input), so a wrong/omitted
+    cache_creation_input_tokens produces a detectably smaller usd_per_query.
+    """
+
+    def cache_writing_pattern(question: str, k: int = 5) -> AnswerWithCitations:
+        return AnswerWithCitations(
+            answer="answer",
+            retrieved_chunk_ids=["c1"],
+            latency_ms=1.0,
+            input_tokens=1000,
+            output_tokens=100,
+            cached_input_tokens=0,
+            cache_creation_input_tokens=1000,
+        )
+
+    result = run_pattern(
+        recipe_fn=cache_writing_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(),
+        generation_model="claude-sonnet-5",
+        judges_enabled=False,
+        verbose=False,
+    )
+
+    assert result.n_accounting_errors == 0
+    # Expected per-question generation cost with cache_creation priced in:
+    # 1000 cache-write tokens @ $2.50/1M + 100 output @ $10/1M = $0.0035.
+    # If cache_creation_input_tokens were dropped, cost_usd() would instead
+    # price all 1000 input tokens at the plain $2.00/1M rate (+ output),
+    # giving $0.0030 -- a smaller, detectably wrong number.
+    expected_per_question = (1000 / 1_000_000) * 2.50 + (100 / 1_000_000) * 10.00
+    assert result.usd_per_query == expected_per_question
+
+
 def test_run_pattern_without_trace_output_path_is_unaffected():
     # Omitting trace_output_path (the existing, default call shape) must
     # still work exactly as before -- proves the new param has zero impact

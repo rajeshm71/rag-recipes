@@ -204,6 +204,7 @@ def run_pattern(
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,
                     cached_input_tokens=result.cached_input_tokens,
+                    cache_creation_input_tokens=result.cache_creation_input_tokens,
                 )
 
                 fa = filter_accuracy(result.extracted_filter, requires_filter)

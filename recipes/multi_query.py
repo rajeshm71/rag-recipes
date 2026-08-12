@@ -97,6 +97,8 @@ def make_retrieve_and_answer(
             output_tokens=decompose_response.output_tokens + final_response.output_tokens,
             cached_input_tokens=decompose_response.cached_input_tokens
             + final_response.cached_input_tokens,
+            cache_creation_input_tokens=decompose_response.cache_creation_input_tokens
+            + final_response.cache_creation_input_tokens,
         )
 
     return retrieve_and_answer

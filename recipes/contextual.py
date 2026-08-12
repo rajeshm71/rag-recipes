@@ -116,6 +116,7 @@ def make_retrieve_and_answer(
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             cached_input_tokens=response.cached_input_tokens,
+            cache_creation_input_tokens=response.cache_creation_input_tokens,
         )
 
     return retrieve_and_answer

@@ -61,7 +61,7 @@ def make_retrieve_and_answer(
     def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations:
         start = time.perf_counter()
         accumulated_ids: list[str] = []
-        total_input = total_output = total_cached = 0
+        total_input = total_output = total_cached = total_cache_creation = 0
         current_query = question
 
         for hop in range(max_hops):
@@ -80,6 +80,7 @@ def make_retrieve_and_answer(
             total_input += hop_response.input_tokens
             total_output += hop_response.output_tokens
             total_cached += hop_response.cached_input_tokens
+            total_cache_creation += hop_response.cache_creation_input_tokens
 
             next_query = _parse_next_query(hop_response.text)
             if next_query is None:
@@ -95,6 +96,7 @@ def make_retrieve_and_answer(
         total_input += final_response.input_tokens
         total_output += final_response.output_tokens
         total_cached += final_response.cached_input_tokens
+        total_cache_creation += final_response.cache_creation_input_tokens
 
         latency_ms = (time.perf_counter() - start) * 1000
         return AnswerWithCitations(
@@ -104,6 +106,7 @@ def make_retrieve_and_answer(
             input_tokens=total_input,
             output_tokens=total_output,
             cached_input_tokens=total_cached,
+            cache_creation_input_tokens=total_cache_creation,
         )
 
     return retrieve_and_answer

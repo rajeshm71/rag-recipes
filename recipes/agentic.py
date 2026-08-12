@@ -98,7 +98,7 @@ def make_retrieve_and_answer(
         start = time.perf_counter()
         transcript: list[dict] = []
         accumulated_ids: list[str] = []
-        total_input = total_output = total_cached = 0
+        total_input = total_output = total_cached = total_cache_creation = 0
 
         for _ in range(max_iterations):
             prompt = agentic_template.format(question=question, transcript=_render_transcript(transcript))
@@ -106,6 +106,7 @@ def make_retrieve_and_answer(
             total_input += response.input_tokens
             total_output += response.output_tokens
             total_cached += response.cached_input_tokens
+            total_cache_creation += response.cache_creation_input_tokens
 
             step = _parse_agent_action(response.text)
             if step["action"] == "finish":
@@ -130,6 +131,7 @@ def make_retrieve_and_answer(
         total_input += final_response.input_tokens
         total_output += final_response.output_tokens
         total_cached += final_response.cached_input_tokens
+        total_cache_creation += final_response.cache_creation_input_tokens
 
         latency_ms = (time.perf_counter() - start) * 1000
         return AnswerWithCitations(
@@ -139,6 +141,7 @@ def make_retrieve_and_answer(
             input_tokens=total_input,
             output_tokens=total_output,
             cached_input_tokens=total_cached,
+            cache_creation_input_tokens=total_cache_creation,
             tool_call_trace=transcript,
         )
 
