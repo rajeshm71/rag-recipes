@@ -65,12 +65,14 @@ class PatternResult:
     # message, even though the retrieval score for that question was kept.
     n_judge_errors: int = 0
     # FIX (code review, same bug class as n_judge_errors): cost accounting
-    # (cost_usd) and filter-accuracy scoring happened in the SAME try block
-    # as the hit@k/mrr/latency appends, so a failure in either of those
-    # later steps would still print "no retrieval data" even though the
-    # retrieval scores were already appended and kept. Not reachable today
-    # (both P2 patterns hardcode a valid, priced generation model), but the
-    # same latent-bug shape the judge split already fixed elsewhere.
+    # (cost_usd), filter-accuracy scoring, and (as of P4) the tool-call
+    # trace-file write all happened in the SAME try block as the
+    # hit@k/mrr/latency appends, so a failure in any of those later steps
+    # would still print "no retrieval data" even though the retrieval
+    # scores were already appended and kept. Not reachable today (P2's
+    # patterns hardcode a valid, priced generation model; P4's
+    # tool_call_trace entries are always JSON-serializable), but the same
+    # latent-bug shape the judge split already fixed elsewhere.
     n_accounting_errors: int = 0
 
 
@@ -170,21 +172,26 @@ def run_pattern(
                 hit10_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 10))
                 mrr_scores.append(mrr(result.retrieved_chunk_ids, relevant_ids))
                 latencies.append(result.latency_ms)
-
-                if trace_file is not None and result.tool_call_trace:
-                    trace_file.write(
-                        json.dumps({"qid": qid, "question": question, "trace": result.tool_call_trace}) + "\n"
-                    )
             except Exception as exc:  # noqa: BLE001 -- deliberately broad, see comment above
                 n_errors += 1
                 print(f"  WARNING: question {qid!r} failed and was skipped (no retrieval data): {exc}", file=sys.stderr)
                 continue
 
-            # FIX (code review): cost accounting and filter scoring are their
-            # own try/except, separate from the hit@k/mrr appends above. A
-            # failure here (e.g. an unpriced generation_model) must not be
-            # reported as "no retrieval data" -- the retrieval scores above
-            # were already appended and are kept regardless.
+            # FIX (P4 code review): cost accounting, filter scoring, AND the
+            # trace-file write are all their own try/except, separate from
+            # the hit@k/mrr appends above. A failure here (e.g. an unpriced
+            # generation_model, or -- the bug this fix addresses -- a
+            # trace-serialization failure) must not be reported as "no
+            # retrieval data": the retrieval scores above were already
+            # appended and are kept regardless. The trace write was
+            # originally inside the recipe_fn try block above; that had the
+            # exact same latent-bug shape n_judge_errors/n_accounting_errors
+            # were already introduced to fix -- a json.dumps() or file-write
+            # failure would have been misattributed as a full recipe_fn
+            # failure, discarding real retrieval scores. Not reachable today
+            # (agentic.py's tool_call_trace entries are always plain dicts
+            # of strings, always JSON-serializable), but closes the same
+            # risk class before a future pattern's trace shape changes that.
             try:
                 generation_usd_total += cost_usd(
                     generation_model,
@@ -196,9 +203,14 @@ def run_pattern(
                 fa = filter_accuracy(result.extracted_filter, requires_filter)
                 if fa is not None:
                     filter_scores.append(fa)
+
+                if trace_file is not None and result.tool_call_trace:
+                    trace_file.write(
+                        json.dumps({"qid": qid, "question": question, "trace": result.tool_call_trace}) + "\n"
+                    )
             except Exception as exc:  # noqa: BLE001
                 n_accounting_errors += 1
-                print(f"  WARNING: question {qid!r} retrieval succeeded but cost/filter "
+                print(f"  WARNING: question {qid!r} retrieval succeeded but cost/filter/trace "
                       f"accounting failed: {exc}", file=sys.stderr)
 
             if not judges_enabled:
@@ -289,5 +301,6 @@ def print_result(result: PatternResult) -> None:
               f"above are computed over fewer questions than hit@k/mrr")
     if result.n_accounting_errors:
         print(f"  WARNING: {result.n_accounting_errors} question(s) had retrieval succeed but "
-              f"cost/filter accounting fail (see stderr) -- usd_per_query/eval_usd/filter_accuracy "
-              f"may be understated")
+              f"cost/filter/trace accounting fail (see stderr) -- usd_per_query/eval_usd/"
+              f"filter_accuracy may be understated, and/or a trace entry may be missing from "
+              f"the trace output file")

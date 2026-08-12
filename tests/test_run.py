@@ -271,7 +271,10 @@ def test_run_pattern_keeps_retrieval_scores_when_only_accounting_fails(capsys):
     assert result.eval_usd < 0.01  # sanity: nowhere near what generation cost would add
 
     printed = capsys.readouterr().err
-    assert "retrieval succeeded but cost/filter accounting failed" in printed
+    # FIX (P4 code review): message widened from "cost/filter accounting
+    # failed" to "cost/filter/trace accounting failed" when the trace write
+    # was folded into this same try/except -- update the assertion to match.
+    assert "retrieval succeeded but cost/filter/trace accounting failed" in printed
     assert "failed and was skipped (no retrieval data)" not in printed
 
 
@@ -310,6 +313,59 @@ def test_run_pattern_writes_tool_call_traces_when_path_given(tmp_path):
         assert parsed["qid"] == record["qid"]
         assert parsed["question"] == record["question"]
         assert parsed["trace"] == [{"action": "search_dense", "action_input": record["question"]}]
+
+
+def test_run_pattern_keeps_retrieval_scores_when_only_trace_write_fails(capsys, tmp_path):
+    """Regression test for the P4 code-review fix: the trace-file write was
+    originally inside the SAME try block as the hit@k/mrr/latency appends,
+    so a trace-serialization failure (e.g. a non-JSON-serializable value in
+    tool_call_trace) would have been misattributed as a full recipe_fn
+    failure, discarding real retrieval scores -- the exact bug shape
+    n_judge_errors/n_accounting_errors were already introduced to fix
+    elsewhere. Moving the write into the accounting try/except closes it.
+    """
+    gen_llm = MockLLM(default_response="answer")
+
+    class _NotJsonSerializable:
+        pass
+
+    def traced_pattern(question: str, k: int = 5) -> AnswerWithCitations:
+        response = gen_llm.complete(prompt=question, model="gpt-4.1-mini-2025-04-14")
+        return AnswerWithCitations(
+            answer=response.text,
+            retrieved_chunk_ids=["c1"],
+            latency_ms=response.latency_ms,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            # Deliberately not JSON-serializable, to force json.dumps() to
+            # raise inside the trace-write step.
+            tool_call_trace=[{"action": "search_dense", "bad_value": _NotJsonSerializable()}],
+        )
+
+    trace_path = tmp_path / "agentic_traces.jsonl"
+    result = run_pattern(
+        recipe_fn=traced_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(),
+        judges_enabled=False,
+        verbose=False,
+        trace_output_path=trace_path,
+    )
+
+    # recipe_fn itself never failed -- n_errors stays 0.
+    assert result.n_errors == 0
+    # The trace write failed for every question -- counted as an
+    # accounting error, not a recipe_fn failure.
+    assert result.n_accounting_errors == len(FIXTURE_QA_SET)
+    # Retrieval metrics are real and were NOT discarded by the trace-write
+    # failure.
+    assert result.n_questions == len(FIXTURE_QA_SET)
+    assert result.hit_at_3.mean > 0.0
+
+    printed = capsys.readouterr().err
+    assert "retrieval succeeded but cost/filter/trace accounting failed" in printed
+    assert "failed and was skipped (no retrieval data)" not in printed
 
 
 def test_run_pattern_without_trace_output_path_is_unaffected():
