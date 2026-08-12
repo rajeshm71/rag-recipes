@@ -9,6 +9,8 @@ this test proves the full run_pattern() orchestration -- retrieval metrics
 AND judge-derived metrics -- with zero real API calls (SPEC.md R8).
 """
 
+import json
+
 from recipes import AnswerWithCitations
 from recipes.llm import MockLLM
 from evals.run import run_pattern
@@ -271,3 +273,56 @@ def test_run_pattern_keeps_retrieval_scores_when_only_accounting_fails(capsys):
     printed = capsys.readouterr().err
     assert "retrieval succeeded but cost/filter accounting failed" in printed
     assert "failed and was skipped (no retrieval data)" not in printed
+
+
+def test_run_pattern_writes_tool_call_traces_when_path_given(tmp_path):
+    """Regression test for P4 (pattern 10): trace_output_path, when given,
+    must get one JSON line per question with a non-empty tool_call_trace.
+    """
+    gen_llm = MockLLM(default_response="answer")
+
+    def traced_pattern(question: str, k: int = 5) -> AnswerWithCitations:
+        response = gen_llm.complete(prompt=question, model="gpt-4.1-mini-2025-04-14")
+        return AnswerWithCitations(
+            answer=response.text,
+            retrieved_chunk_ids=["c1"],
+            latency_ms=response.latency_ms,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            tool_call_trace=[{"action": "search_dense", "action_input": question}],
+        )
+
+    trace_path = tmp_path / "agentic_traces.jsonl"
+    run_pattern(
+        recipe_fn=traced_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(),
+        judges_enabled=False,
+        verbose=False,
+        trace_output_path=trace_path,
+    )
+
+    lines = trace_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == len(FIXTURE_QA_SET)
+    for line, record in zip(lines, FIXTURE_QA_SET):
+        parsed = json.loads(line)
+        assert parsed["qid"] == record["qid"]
+        assert parsed["question"] == record["question"]
+        assert parsed["trace"] == [{"action": "search_dense", "action_input": record["question"]}]
+
+
+def test_run_pattern_without_trace_output_path_is_unaffected():
+    # Omitting trace_output_path (the existing, default call shape) must
+    # still work exactly as before -- proves the new param has zero impact
+    # when unused.
+    dummy_pattern = _dummy_pattern_factory()
+    result = run_pattern(
+        recipe_fn=dummy_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(),
+        judges_enabled=False,
+        verbose=False,
+    )
+    assert result.n_questions == len(FIXTURE_QA_SET)

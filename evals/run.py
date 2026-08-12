@@ -114,6 +114,11 @@ def run_pattern(
     judges_enabled: bool = True,
     k: int = 10,
     verbose: bool = True,
+    # NEW (P4, pattern 10): when given, every question whose
+    # result.tool_call_trace is non-empty gets appended as one JSON line
+    # here. Every other pattern leaves this None, so this is a
+    # zero-behavior-change default for the 9 patterns that don't use it.
+    trace_output_path: str | Path | None = None,
 ) -> PatternResult:
     """Run `recipe_fn` over every question in `qa_set`, score it against
     every metric in SPEC.md §5, and return the aggregated result.
@@ -135,83 +140,97 @@ def run_pattern(
     n_judge_errors = 0
     n_accounting_errors = 0
 
-    for record in qa_set:
-        question = record["question"]
-        qid = record.get("qid", question[:40])
-        relevant_ids = record["relevant_chunk_ids"]
-        requires_filter = record.get("requires_filter")
+    # NEW (P4): open in "w" mode (truncate) so re-running a notebook cell
+    # doesn't silently accumulate stale entries from a previous run -- same
+    # "clean run" principle SPEC.md §19 Q4 already applies to every other
+    # committed notebook output.
+    trace_file = open(trace_output_path, "w", encoding="utf-8") if trace_output_path is not None else None
+    try:
+        for record in qa_set:
+            question = record["question"]
+            qid = record.get("qid", question[:40])
+            relevant_ids = record["relevant_chunk_ids"]
+            requires_filter = record.get("requires_filter")
 
-        # FIX (review #3): isolate each question so one bad recipe_fn call
-        # doesn't lose every score already collected for prior questions in
-        # this run. Previously an uncaught exception here would propagate
-        # straight out of run_pattern and discard the whole run -- costly
-        # for a real, paid eval run against real APIs. This block covers
-        # ONLY recipe_fn itself plus the minimal hit@k/mrr/latency scoring
-        # that depends solely on its return value -- cost accounting, filter
-        # scoring, and judge calls are each their own try/except below,
-        # since a failure in any of those is a fundamentally different
-        # situation from recipe_fn itself failing (retrieval data already
-        # exists and is real in all of those cases).
-        try:
-            result = recipe_fn(question, k=k)
+            # FIX (review #3): isolate each question so one bad recipe_fn call
+            # doesn't lose every score already collected for prior questions in
+            # this run. Previously an uncaught exception here would propagate
+            # straight out of run_pattern and discard the whole run -- costly
+            # for a real, paid eval run against real APIs. This block covers
+            # ONLY recipe_fn itself plus the minimal hit@k/mrr/latency scoring
+            # that depends solely on its return value -- cost accounting, filter
+            # scoring, and judge calls are each their own try/except below,
+            # since a failure in any of those is a fundamentally different
+            # situation from recipe_fn itself failing (retrieval data already
+            # exists and is real in all of those cases).
+            try:
+                result = recipe_fn(question, k=k)
 
-            hit3_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 3))
-            hit10_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 10))
-            mrr_scores.append(mrr(result.retrieved_chunk_ids, relevant_ids))
-            latencies.append(result.latency_ms)
-        except Exception as exc:  # noqa: BLE001 -- deliberately broad, see comment above
-            n_errors += 1
-            print(f"  WARNING: question {qid!r} failed and was skipped (no retrieval data): {exc}", file=sys.stderr)
-            continue
+                hit3_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 3))
+                hit10_scores.append(hit_at_k(result.retrieved_chunk_ids, relevant_ids, 10))
+                mrr_scores.append(mrr(result.retrieved_chunk_ids, relevant_ids))
+                latencies.append(result.latency_ms)
 
-        # FIX (code review): cost accounting and filter scoring are their
-        # own try/except, separate from the hit@k/mrr appends above. A
-        # failure here (e.g. an unpriced generation_model) must not be
-        # reported as "no retrieval data" -- the retrieval scores above
-        # were already appended and are kept regardless.
-        try:
-            generation_usd_total += cost_usd(
-                generation_model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                cached_input_tokens=result.cached_input_tokens,
-            )
+                if trace_file is not None and result.tool_call_trace:
+                    trace_file.write(
+                        json.dumps({"qid": qid, "question": question, "trace": result.tool_call_trace}) + "\n"
+                    )
+            except Exception as exc:  # noqa: BLE001 -- deliberately broad, see comment above
+                n_errors += 1
+                print(f"  WARNING: question {qid!r} failed and was skipped (no retrieval data): {exc}", file=sys.stderr)
+                continue
 
-            fa = filter_accuracy(result.extracted_filter, requires_filter)
-            if fa is not None:
-                filter_scores.append(fa)
-        except Exception as exc:  # noqa: BLE001
-            n_accounting_errors += 1
-            print(f"  WARNING: question {qid!r} retrieval succeeded but cost/filter "
-                  f"accounting failed: {exc}", file=sys.stderr)
+            # FIX (code review): cost accounting and filter scoring are their
+            # own try/except, separate from the hit@k/mrr appends above. A
+            # failure here (e.g. an unpriced generation_model) must not be
+            # reported as "no retrieval data" -- the retrieval scores above
+            # were already appended and are kept regardless.
+            try:
+                generation_usd_total += cost_usd(
+                    generation_model,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    cached_input_tokens=result.cached_input_tokens,
+                )
 
-        if not judges_enabled:
-            continue
+                fa = filter_accuracy(result.extracted_filter, requires_filter)
+                if fa is not None:
+                    filter_scores.append(fa)
+            except Exception as exc:  # noqa: BLE001
+                n_accounting_errors += 1
+                print(f"  WARNING: question {qid!r} retrieval succeeded but cost/filter "
+                      f"accounting failed: {exc}", file=sys.stderr)
 
-        # FIX (P2, evals/run.py bug found while building 02_bm25.ipynb):
-        # separate try/except so a judge failure only drops THIS question's
-        # judge scores, not the retrieval scores already appended above.
-        # The old single try/except wrapped both, so a judge-only failure
-        # incremented n_errors and printed "failed and was skipped" even
-        # though hit@k/mrr for that question were real, valid, and kept --
-        # a misleading message for what actually happened.
-        try:
-            context = _build_context(result.retrieved_chunk_ids, corpus_by_id)
+            if not judges_enabled:
+                continue
 
-            fr = judge_faithfulness(llm, question, context, result.answer)
-            faithfulness_scores.append(fr.score)
-            judge_usd_total += fr.usd_cost
+            # FIX (P2, evals/run.py bug found while building 02_bm25.ipynb):
+            # separate try/except so a judge failure only drops THIS question's
+            # judge scores, not the retrieval scores already appended above.
+            # The old single try/except wrapped both, so a judge-only failure
+            # incremented n_errors and printed "failed and was skipped" even
+            # though hit@k/mrr for that question were real, valid, and kept --
+            # a misleading message for what actually happened.
+            try:
+                context = _build_context(result.retrieved_chunk_ids, corpus_by_id)
 
-            rr = judge_answer_relevance(llm, question, result.answer)
-            relevance_scores.append(rr.score)
-            judge_usd_total += rr.usd_cost
+                fr = judge_faithfulness(llm, question, context, result.answer)
+                faithfulness_scores.append(fr.score)
+                judge_usd_total += fr.usd_cost
 
-            cr = judge_citation_accuracy(llm, context, result.answer)
-            citation_scores.append(cr.score)
-            judge_usd_total += cr.usd_cost
-        except Exception as exc:  # noqa: BLE001
-            n_judge_errors += 1
-            print(f"  WARNING: question {qid!r} retrieval succeeded but judging failed: {exc}", file=sys.stderr)
+                rr = judge_answer_relevance(llm, question, result.answer)
+                relevance_scores.append(rr.score)
+                judge_usd_total += rr.usd_cost
+
+                cr = judge_citation_accuracy(llm, context, result.answer)
+                citation_scores.append(cr.score)
+                judge_usd_total += cr.usd_cost
+            except Exception as exc:  # noqa: BLE001
+                n_judge_errors += 1
+                print(f"  WARNING: question {qid!r} retrieval succeeded but judging failed: {exc}", file=sys.stderr)
+    finally:
+        if trace_file is not None:
+            trace_file.close()
 
     p50, p95 = latency_percentiles(latencies)
     n = len(qa_set)

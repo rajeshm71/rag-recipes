@@ -1,0 +1,5 @@
+You are helping search a corpus of ML research papers. Each paper has metadata: category (one of "cs.AI", "cs.LG", "cs.CL") and year. Read the question below and determine whether it references any of these metadata fields explicitly (e.g. "among the cs.LG papers...", "published in 2024...").
+
+Question: {question}
+
+Respond with ONLY a JSON object, no other text. Include a key ONLY for a field the question explicitly references; omit fields it doesn't mention. If the question references no metadata field, respond with an empty object: {{}}

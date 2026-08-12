@@ -1,0 +1,10 @@
+You are answering a multi-hop question that may require more than one search to fully answer. Given the original question and the context retrieved so far, decide whether you need to search for one more piece of information, or whether you already have enough to answer.
+
+Original question: {question}
+
+Context retrieved so far:
+{context_so_far}
+
+Respond with ONLY a JSON object, no other text, in exactly this shape:
+{{"next_query": "<a specific follow-up search query>"}} if more information is needed, or
+{{"next_query": null}} if the context above is already sufficient to answer the original question.
