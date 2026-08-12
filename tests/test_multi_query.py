@@ -52,6 +52,43 @@ def test_llm_called_twice_and_dense_search_runs_per_subquery():
     assert len(embedder.calls) == 1 + 2
 
 
+# FIX (code review): the plan explicitly called for a direct test of the
+# best-rank merge logic in recipes/multi_query.py's `best_rank` dict --
+# "a chunk ranked #1 by one sub-query and #5 by another ends up using rank
+# #1" -- which no prior test exercised (the existing test only counted
+# embed() calls, not the merge outcome). MockEmbedder's hash-based vectors
+# aren't semantically controllable, so dense_search is stubbed directly
+# with per-subquery results instead, isolating the merge arithmetic itself
+# from embedding realism.
+def test_merge_uses_best_rank_across_subqueries(monkeypatch):
+    llm = MockLLM(
+        canned={DECOMPOSE_MARKER: '{"queries": ["sub one", "sub two"]}'},
+        default_response="final answer",
+    )
+
+    # sub one ranks: c1=1, c2=2, c3=3
+    # sub two ranks: c3=1, c1=2, c2=3
+    # best (lowest) rank per chunk: c1=1, c3=1, c2=2
+    fake_results = {
+        "sub one": ["c1", "c2", "c3"],
+        "sub two": ["c3", "c1", "c2"],
+    }
+
+    def fake_dense_search(store, embedder, embedding_model, query_text, k):
+        return fake_results[query_text]
+
+    monkeypatch.setattr("recipes.multi_query.dense_search", fake_dense_search)
+
+    fn = make_retrieve_and_answer(FIXTURE_CORPUS, embedder=MockEmbedder(), llm=llm)
+    result = fn("some question", k=3)
+
+    # c3 was only rank 3 under "sub one" but rank 1 under "sub two" -- its
+    # best rank (1) must win, placing it ahead of c2 (best rank 2). Ties
+    # (c1 and c3, both best rank 1) preserve first-seen order, since
+    # `sorted()` is stable and c1 was inserted into best_rank first.
+    assert result.retrieved_chunk_ids == ["c1", "c3", "c2"]
+
+
 def test_result_uses_final_call_answer():
     llm = MockLLM(
         canned={DECOMPOSE_MARKER: '{"queries": ["query one"]}'},
