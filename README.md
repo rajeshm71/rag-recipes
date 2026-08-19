@@ -4,18 +4,13 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 
-Picking a RAG pattern usually means trusting one blog post's benchmark, on their corpus, with
-their prompt. This repo runs 10 patterns against the *same* corpus, the *same* eval set, and the
-*same* held-constant generation prompt, so the comparison is actually fair. Copy any pattern
-straight into your own project.
-
 ## Contents
 
-- [Project status](#project-status)
+- [Introduction](#introduction)
 - [Leaderboard](#leaderboard)
-- [Quick start](#quick-start)
-- [Which pattern should I use?](#which-pattern-should-i-use)
 - [The 10 patterns](#the-10-patterns)
+- [Which pattern should I use?](#which-pattern-should-i-use)
+- [Quick start](#quick-start)
 - [Appendices](#appendices)
 - [How the eval works](#how-the-eval-works)
 - [Non-goals](#non-goals)
@@ -23,47 +18,25 @@ straight into your own project.
 
 ---
 
-## Project status
+## Introduction
 
-> **11 of the 12 leaderboard rows below are real retrieval-quality results** -- real
-> `text-embedding-3-small` embeddings, real `gpt-4.1-mini` generation, real `gpt-5.4-mini` judging,
-> against this repo's 54-chunk pilot corpus. Pattern 07 (contextual retrieval) still shows mock
-> numbers -- it needs `ANTHROPIC_API_KEY`, which hasn't been run yet. The A1 chunking study is
-> fully real (all 6 variants); A2's embedding swap has its OpenAI row real, with the Voyage and
-> local-model rows still pending. Scores below are honest for this pilot-scale corpus, not a
-> larger scale this project could eventually grow into -- see [How the eval
-> works](#how-the-eval-works) for the actual numbers.
+rag-recipes is a benchmark suite for RAG (retrieval-augmented generation) patterns. It runs 10
+distinct patterns, from naive dense retrieval through agentic RAG, against the same corpus, the
+same eval set, and the same held-constant generation prompt, producing a single fair comparison
+instead of scattered one-off blog benchmarks. Every pattern ships as both a runnable notebook and
+an importable Python function under `recipes/`, ready to copy straight into another project. This
+is a recipe collection, not an installable library: there is no `pip install rag-recipes`.
 
 ## Leaderboard 🏆
 
 ![rag-recipes leaderboard](outputs/leaderboard.png)
 
-Full detail (every metric, 95% CIs, cost) in [`outputs/leaderboard.md`](outputs/leaderboard.md).
-Reproduce it yourself: [`notebooks/11_leaderboard.ipynb`](notebooks/11_leaderboard.ipynb).
+Full detail (every metric, 95% CIs, cost) lives in
+[`outputs/leaderboard.md`](outputs/leaderboard.md). The notebook that produces it,
+[`notebooks/11_leaderboard.ipynb`](notebooks/11_leaderboard.ipynb), is fully reproducible end to
+end.
 
 **[Skip straight to results →](notebooks/11_leaderboard.ipynb)**
-
----
-
-## Quick start
-
-```bash
-git clone https://github.com/rajeshm71/rag-recipes && cd rag-recipes
-uv sync
-cp .env.example .env   # fill in OPENAI_API_KEY (and ANTHROPIC_API_KEY for pattern 07)
-jupyter lab notebooks/
-```
-
-## Which pattern should I use?
-
-- **General default:** hybrid retrieval + cross-encoder rerank (patterns 03 + 04) -- strong,
-  low-surprise baseline for most corpora.
-- **Jargon-heavy corpora** (queries phrased very differently from your documents' language):
-  contextual retrieval (pattern 07) or HyDE (pattern 05).
-- **Small corpora** (under ~200 pages): the long-context baseline (00b) can beat retrieval
-  entirely, with none of the engineering overhead.
-
-See [`docs/choosing.md`](docs/choosing.md) for the full decision tree.
 
 ---
 
@@ -85,6 +58,28 @@ See [`docs/choosing.md`](docs/choosing.md) for the full decision tree.
 Each pattern is both a notebook (with a required "Where this pattern FAILS" section -- wins alone
 aren't the point) and an importable function in `recipes/<pattern>.py`. To use one in your own
 project, copy the file directly -- this repo is a recipe collection, not an installable library.
+
+## Which pattern should I use?
+
+- **General default:** hybrid retrieval + cross-encoder rerank (patterns 03 + 04) -- strong,
+  low-surprise baseline for most corpora.
+- **Jargon-heavy corpora** (queries phrased very differently from your documents' language):
+  contextual retrieval (pattern 07) or HyDE (pattern 05).
+- **Small corpora** (under ~200 pages): the long-context baseline (00b) can beat retrieval
+  entirely, with none of the engineering overhead.
+
+The full decision tree lives in [`docs/choosing.md`](docs/choosing.md).
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/rajeshm71/rag-recipes && cd rag-recipes
+uv sync
+cp .env.example .env   # fill in OPENAI_API_KEY (and ANTHROPIC_API_KEY for pattern 07)
+jupyter lab notebooks/
+```
 
 ## Appendices
 
