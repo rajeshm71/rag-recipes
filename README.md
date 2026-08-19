@@ -1,29 +1,60 @@
-# rag-recipes
+# rag-recipes 🧪
 
-10 RAG patterns as runnable notebooks, benchmarked on the same corpus and eval set. Copy any
-pattern into your own project.
+![CI](https://github.com/rajeshm71/rag-recipes/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+
+Picking a RAG pattern usually means trusting one blog post's benchmark, on their corpus, with
+their prompt. This repo runs 10 patterns against the *same* corpus, the *same* eval set, and the
+*same* held-constant generation prompt, so the comparison is actually fair. Copy any pattern
+straight into your own project.
+
+## Contents
+
+- [Project status](#project-status)
+- [Leaderboard](#leaderboard)
+- [Quick start](#quick-start)
+- [Which pattern should I use?](#which-pattern-should-i-use)
+- [The 10 patterns](#the-10-patterns)
+- [Appendices](#appendices)
+- [How the eval works](#how-the-eval-works)
+- [Non-goals](#non-goals)
+- [Contributing and license](#contributing-and-license)
+
+---
 
 ## Project status
 
-The pipeline is fully built and has been run for real: **11 of the 12 leaderboard rows below are
-real retrieval-quality results** (real `text-embedding-3-small` embeddings, real `gpt-4.1-mini`
-generation, real `gpt-5.4-mini` judging) against this repo's 54-chunk pilot corpus. Pattern 07
-(contextual retrieval) still shows mock numbers -- it needs `ANTHROPIC_API_KEY`, which hasn't been
-run yet. The A1 chunking study is fully real (all 6 variants); A2's embedding swap has its OpenAI
-row real, with the Voyage and local-model rows still pending. Scores below are honest for this
-pilot-scale corpus, not the larger corpus this project could eventually scale to -- see "How the
-eval works" for the actual numbers.
+> **11 of the 12 leaderboard rows below are real retrieval-quality results** -- real
+> `text-embedding-3-small` embeddings, real `gpt-4.1-mini` generation, real `gpt-5.4-mini` judging,
+> against this repo's 54-chunk pilot corpus. Pattern 07 (contextual retrieval) still shows mock
+> numbers -- it needs `ANTHROPIC_API_KEY`, which hasn't been run yet. The A1 chunking study is
+> fully real (all 6 variants); A2's embedding swap has its OpenAI row real, with the Voyage and
+> local-model rows still pending. Scores below are honest for this pilot-scale corpus, not a
+> larger scale this project could eventually grow into -- see [How the eval
+> works](#how-the-eval-works) for the actual numbers.
 
-## Leaderboard
+## Leaderboard 🏆
 
 ![rag-recipes leaderboard](outputs/leaderboard.png)
 
 Full detail (every metric, 95% CIs, cost) in [`outputs/leaderboard.md`](outputs/leaderboard.md).
 Reproduce it yourself: [`notebooks/11_leaderboard.ipynb`](notebooks/11_leaderboard.ipynb).
 
-**[Skip to results →](notebooks/11_leaderboard.ipynb)**
+**[Skip straight to results →](notebooks/11_leaderboard.ipynb)**
 
-## What wins by default?
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/rajeshm71/rag-recipes && cd rag-recipes
+uv sync
+cp .env.example .env   # fill in OPENAI_API_KEY (and ANTHROPIC_API_KEY for pattern 07)
+jupyter lab notebooks/
+```
+
+## Which pattern should I use?
 
 - **General default:** hybrid retrieval + cross-encoder rerank (patterns 03 + 04) -- strong,
   low-surprise baseline for most corpora.
@@ -34,29 +65,7 @@ Reproduce it yourself: [`notebooks/11_leaderboard.ipynb`](notebooks/11_leaderboa
 
 See [`docs/choosing.md`](docs/choosing.md) for the full decision tree.
 
-## Quick Start
-
-```bash
-git clone https://github.com/rajeshm71/rag-recipes && cd rag-recipes
-uv sync
-cp .env.example .env   # fill in OPENAI_API_KEY (and ANTHROPIC_API_KEY for pattern 07)
-jupyter lab notebooks/
-```
-
-## Cost warning
-
-**Measured, not estimated:** a clean-cache run of the full leaderboard (18-question pilot eval set
-× 12 patterns/baselines, 11 of them real) cost **$1.89** in `eval_usd`, using
-`gpt-4.1-mini-2025-04-14` for generation and `gpt-5.4-mini-2026-03-17` for judging. This is the
-pilot-scale (54-chunk corpus, 18 questions) figure, not the larger scale this project could
-eventually grow into -- a bigger corpus and eval set would cost proportionally more, since judge
-calls (not generation) dominate the cost. Judge calls are cached to disk
-(`outputs/.judge_cache/`) so re-running a notebook doesn't re-bill identical judge calls; delete
-that directory first if you want a genuine from-scratch cost figure of your own.
-
-## Which pattern should I use?
-
-See [`docs/choosing.md`](docs/choosing.md) for a full decision tree, or skim the table below.
+---
 
 ## The 10 patterns
 
@@ -79,10 +88,14 @@ project, copy the file directly -- this repo is a recipe collection, not an inst
 
 ## Appendices
 
-- [00: No-RAG baseline](notebooks/00_baseline_no_rag.ipynb) -- same eval set, no retrieval, parametric memory only
-- [00b: Long-context baseline](notebooks/00b_long_context_baseline.ipynb) -- stuff the whole corpus into context instead of retrieving
-- [A1: Chunking study](notebooks/A1_chunking_study.ipynb) -- fixed-256/512/1024, semantic, document-aware, late chunking, retrieval held constant
-- [A2: Embedding swap](notebooks/A2_embedding_swap.ipynb) -- `text-embedding-3-small` vs. `voyage-4` vs. local `bge-large-en-v1.5`, retrieval held constant
+| Notebook | What it studies |
+|---|---|
+| [00: No-RAG baseline](notebooks/00_baseline_no_rag.ipynb) | Same eval set, no retrieval, parametric memory only |
+| [00b: Long-context baseline](notebooks/00b_long_context_baseline.ipynb) | Stuff the whole corpus into context instead of retrieving |
+| [A1: Chunking study](notebooks/A1_chunking_study.ipynb) | Fixed-256/512/1024, semantic, document-aware, late chunking, retrieval held constant |
+| [A2: Embedding swap](notebooks/A2_embedding_swap.ipynb) | `text-embedding-3-small` vs. `voyage-4` vs. local `bge-large-en-v1.5`, retrieval held constant |
+
+---
 
 ## How the eval works
 
@@ -99,17 +112,15 @@ future direction):
   confidence interval (1000 resamples), since point estimates on this sample size are easy to
   over-interpret. See [`evals/metrics.py`](evals/metrics.py).
 
+---
+
 ## Non-goals
 
 Explicitly out of scope for this repo: multimodal RAG (images, tables inside PDFs), Graph RAG
 (different mental model, deserves its own repo), fine-tuning embeddings, production infrastructure
 (drift monitoring, feature stores, online evals), serving/streaming benchmarks.
 
-## Contributing
+## Contributing and license
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to use this repo, report a bug, or add a new
-pattern.
-
-## License
-
-[MIT](LICENSE)
+pattern. Licensed under [MIT](LICENSE).
