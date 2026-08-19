@@ -41,8 +41,8 @@ jobs:
       - run: uv sync --extra corpus-build
       - name: Cache HuggingFace models
         # A2_embedding_swap.ipynb's LocalEmbedder (BAAI/bge-large-en-v1.5)
-        # is deliberately real, not gated by RAG_RECIPES_LLM=mock (P5's
-        # zero-API-key design) -- without this cache, every CI run would
+        # is deliberately real, not gated by RAG_RECIPES_LLM=mock, since it
+        # needs no API key at all -- without this cache, every CI run would
         # re-download a ~1.3GB-class model from HuggingFace.
         uses: actions/cache@v4
         with:

@@ -15,16 +15,16 @@
 - [ ] `pytest tests/`
 - [ ] `RAG_RECIPES_LLM=mock papermill notebooks/<affected>.ipynb notebooks/<affected>.ipynb --cwd notebooks`
 
-## Checklist (see `SPEC.md` §22 R1-R12 for the full rules)
+## Checklist
 
-- [ ] No new dependency added without prior discussion in an issue (R1, ≤12 top-level deps)
-- [ ] Every LLM/embedder call uses a pinned dated snapshot, not a bare alias (R2)
-- [ ] If this adds/changes a pattern notebook: all 8 §8 sections present, in order, including a
-      real "Where this pattern FAILS" section with at least 2 analyzed failures (R3)
+- [ ] No new dependency added without prior discussion in an issue (≤12 top-level runtime deps)
+- [ ] Every LLM/embedder call uses a pinned dated snapshot, not a bare alias
+- [ ] If this adds/changes a pattern notebook: all 8 mandatory sections present, in order,
+      including a real "Where this pattern FAILS" section with at least 2 analyzed failures
 - [ ] The held-constant generation prompt (`prompts/generation_prompt.txt`) is unchanged, or this
-      PR was pre-discussed in an issue if it touches R4
-- [ ] New/changed metrics report a 95% bootstrap CI where applicable (R5)
-- [ ] No `Co-Authored-By` or AI-tool attribution trailer on commits (R10)
+      PR was pre-discussed in an issue if it needs to change
+- [ ] New/changed metrics report a 95% bootstrap CI where applicable
+- [ ] No `Co-Authored-By` or AI-tool attribution trailer on commits
 - [ ] This PR does one logical thing (a new pattern and a bug fix are two PRs, not one)
 
 ## One logical change per PR

@@ -20,8 +20,8 @@ dependencies = [
 [project.optional-dependencies]
 # Only needed to rebuild corpus/corpus.jsonl from scratch. Not required to run
 # the pattern notebooks, so kept out of the default `uv sync` install.
-# requests is NOT listed here -- it moved to main dependencies in P5 (needed
-# by recipes/embeddings.py's VoyageEmbedder, a REST call, not the voyageai
+# requests is NOT listed here -- it's a main dependency instead (needed by
+# recipes/embeddings.py's VoyageEmbedder, a REST call, not the voyageai
 # SDK -- see that module's docstring for why).
 corpus-build = [
     "pypdf>=4.0",

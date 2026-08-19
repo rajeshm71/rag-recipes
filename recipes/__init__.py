@@ -1,6 +1,6 @@
 """Shared contract every pattern recipe (recipes/<pattern>.py) implements.
 
-Per SPEC.md §16.3, each pattern module exposes:
+Each pattern module exposes:
 
     def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations
 
@@ -37,7 +37,7 @@ class AnswerWithCitations:
     # `requires_filter` ground truth.
     extracted_filter: dict | None = None
     # Only populated by pattern 10 (agentic); logged to
-    # outputs/agentic_traces.jsonl per SPEC.md §6.
+    # outputs/agentic_traces.jsonl so readers can see the agent's reasoning.
     tool_call_trace: list[dict] = field(default_factory=list)
 
 

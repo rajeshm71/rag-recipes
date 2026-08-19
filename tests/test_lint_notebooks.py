@@ -88,9 +88,9 @@ def test_lint_notebook_fails_on_out_of_order_sections(tmp_path):
 
 
 def test_lint_notebook_fails_on_duplicate_section_number(tmp_path):
-    # Regression test found during plan review: a naive dict-from-headers
-    # build would silently keep only the LAST "## 4." header, masking a
-    # real authoring bug (two sections both numbered 4).
+    # A naive dict-from-headers build would silently keep only the LAST
+    # "## 4." header, masking a real authoring bug (two sections both
+    # numbered 4).
     sections = GOOD_SECTIONS + [(4, "Implementation (duplicate)")]
     path = _write_fixture_notebook(tmp_path, "fixture.ipynb", sections)
     problems = lint_notebook(path)

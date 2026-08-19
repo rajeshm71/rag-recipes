@@ -1,12 +1,14 @@
 """LLM adapter. All LLM calls in this project go through this module.
 
-Contract fixed by SPEC.md §10: `LLM.complete()` returns an `LLMResponse` with
-text, token counts, cached-token count (for prompt-caching cost tracking),
-and latency. Three concrete implementations ship here: `OpenAILLM` (real
-API, used for generation/judging/long-context per SPEC.md §3), `AnthropicLLM`
-(real API, used ONLY by pattern 07's contextualization preprocessing step),
-and `MockLLM` (deterministic, used in CI per SPEC.md R8 -- CI never touches
-a real API key, for any provider).
+Contract: `LLM.complete()` returns an `LLMResponse` with text, token counts,
+cached-token count (for prompt-caching cost tracking), and latency. Three
+concrete implementations ship here: `OpenAILLM` (real API, used for
+generation/judging/the long-context baseline -- OpenAI is the default
+provider for every LLM call except one), `AnthropicLLM` (real API, used
+ONLY by pattern 07's contextualization preprocessing step, since Anthropic's
+prompt caching is what makes that pattern economically viable), and
+`MockLLM` (deterministic, used in CI -- CI never touches a real API key,
+for any provider).
 """
 
 from __future__ import annotations
@@ -77,15 +79,14 @@ class OpenAILLM:
         except Exception as exc:
             # Some reasoning-capable models (e.g. gpt-5.4-mini family) reject
             # `temperature` entirely rather than clamping/ignoring it. This
-            # behavior was not confirmed against current docs at write time
-            # (see SPEC.md P1 plan "Known technical risks"), so we handle it
+            # behavior is not confirmed against current docs, so it's handled
             # defensively: on the specific "unsupported parameter" error,
             # retry once without temperature instead of failing the call.
-            # FIX (review #6): build a fresh call from base_kwargs (which
-            # never had temperature) instead of mutating the first call's
-            # kwargs dict via .pop() -- clearer that the two calls are
-            # independent and there's no risk of a stale mutated dict being
-            # reused if this function is ever refactored further.
+            # Build a fresh call from base_kwargs (which never had
+            # temperature) instead of mutating the first call's kwargs dict
+            # via .pop() -- clearer that the two calls are independent and
+            # there's no risk of a stale mutated dict being reused if this
+            # function is ever refactored further.
             message = str(exc).lower()
             if "temperature" in message and (
                 "unsupported" in message or "not supported" in message
@@ -200,9 +201,9 @@ class MockLLM:
 
 class AnthropicLLM:
     """Production adapter for pattern 07's contextualization step ONLY.
-    Requires ANTHROPIC_API_KEY. Per SPEC.md §3, every other LLM call in this
-    project (generation, judging, long-context baseline) uses OpenAI --
-    Anthropic is not a general-purpose swap-in here.
+    Requires ANTHROPIC_API_KEY. Every other LLM call in this project
+    (generation, judging, long-context baseline) uses OpenAI -- Anthropic
+    is not a general-purpose swap-in here.
     """
 
     def __init__(self, api_key: str | None = None) -> None:
@@ -259,7 +260,8 @@ class AnthropicLLM:
 
 
 def get_llm() -> LLM:
-    """Factory respecting the RAG_RECIPES_LLM env var (SPEC.md §12/§13)."""
+    """Factory respecting the RAG_RECIPES_LLM env var (mock in CI, openai for
+    a real run -- see .env.example)."""
     backend = os.environ.get("RAG_RECIPES_LLM", "openai").lower()
     if backend == "mock":
         return MockLLM()

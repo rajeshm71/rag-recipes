@@ -2,19 +2,20 @@
 tool to call (dense search, BM25 search, or stop) rather than following a
 fixed retrieval strategy. The agent's job is retrieval orchestration ONLY:
 `finish` ends the search loop but does not produce the answer, so the final
-answer still goes through the exact same R4 held-constant generation prompt
-every other pattern uses. This keeps R4 airtight (no pattern gets a custom
-generation prompt) while still letting the RETRIEVAL strategy itself be the
-flexible, agentic part, which is SPEC.md's actual key claim for this
-pattern.
+answer still goes through the exact same held-constant generation prompt
+every other pattern uses (no pattern gets a custom generation prompt --
+this keeps every pattern's answer quality attributable to its retrieval
+strategy, not to a better-tuned prompt). This pattern's own flexibility --
+and fragility -- is entirely in the RETRIEVAL loop: "most flexible, hardest
+to debug."
 
 Every step (thought, action, action_input, observation) is recorded into
-the returned AnswerWithCitations.tool_call_trace. Per SPEC.md §6, these
-traces must be logged to outputs/agentic_traces.jsonl -- that file write is
-NOT done here (this function stays pure/side-effect-free, consistent with
-every other recipe module and with the judge-cache test-isolation lesson
-in tasks/lessons.md); it's done by evals/run.py's trace_output_path param,
-which the 10_agentic.ipynb notebook passes in.
+the returned AnswerWithCitations.tool_call_trace so readers can see the
+agent's reasoning. That trace write to outputs/agentic_traces.jsonl is NOT
+done here (this function stays pure/side-effect-free, consistent with
+every other recipe module -- and with keeping any on-disk state fully
+test-isolated); it's done by evals/run.py's trace_output_path param, which
+the 10_agentic.ipynb notebook passes in.
 """
 
 from __future__ import annotations
@@ -43,7 +44,8 @@ def _parse_agent_action(text: str) -> dict:
     """Defensive parse: any failure (bad JSON, invalid action name, missing
     keys) degrades to a forced `finish`, never raises and never loops
     forever on malformed output -- important here specifically, since an
-    agent loop is exactly where SPEC.md calls out "hardest to debug."
+    agentic loop with no bound on malformed-output retries is exactly the
+    "most flexible, hardest to debug" failure mode this pattern is known for.
     """
     fallback = {"thought": "(unparseable response, stopping)", "action": "finish", "action_input": ""}
     try:

@@ -1,8 +1,7 @@
 # LinkedIn launch draft
 
 **Status: TEMPLATE. Do not post as-is.** The bracketed line needs the real leaderboard winner and
-number, which requires a real-key run (see `tasks/todo.md`) -- not yet done as of this draft.
-Everything else is ready.
+number, which requires a real-key run -- not yet done as of this draft. Everything else is ready.
 
 ---
 

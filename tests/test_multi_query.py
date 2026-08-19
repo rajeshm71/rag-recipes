@@ -52,11 +52,10 @@ def test_llm_called_twice_and_dense_search_runs_per_subquery():
     assert len(embedder.calls) == 1 + 2
 
 
-# FIX (code review): the plan explicitly called for a direct test of the
-# best-rank merge logic in recipes/multi_query.py's `best_rank` dict --
-# "a chunk ranked #1 by one sub-query and #5 by another ends up using rank
-# #1" -- which no prior test exercised (the existing test only counted
-# embed() calls, not the merge outcome). MockEmbedder's hash-based vectors
+# Direct test of the best-rank merge logic in recipes/multi_query.py's
+# `best_rank` dict -- a chunk ranked #1 by one sub-query and #5 by another
+# must end up using rank #1 -- which the embed()-call-counting test above
+# doesn't exercise. MockEmbedder's hash-based vectors
 # aren't semantically controllable, so dense_search is stubbed directly
 # with per-subquery results instead, isolating the merge arithmetic itself
 # from embedding realism.

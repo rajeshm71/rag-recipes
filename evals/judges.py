@@ -1,10 +1,10 @@
 """LLM-as-judge callers for faithfulness, answer relevance, and citation
-accuracy (SPEC.md §5's metrics table).
+accuracy.
 
 Every judge call is cached to disk keyed by a hash of its exact inputs, so
-re-running an eval doesn't re-bill the judge model (SPEC.md R5). This is
-required, not an optimization: repeated full-leaderboard runs during
-development would otherwise multiply real API cost for no new information.
+re-running an eval doesn't re-bill the judge model. This is required, not
+an optimization: repeated full-leaderboard runs during development would
+otherwise multiply real API cost for no new information.
 """
 
 from __future__ import annotations
@@ -43,11 +43,11 @@ def _load_prompt(name: str) -> str:
 
 
 def _cache_key(judge_type: str, prompt_template: str, **fields: str) -> str:
-    # FIX (review #1): include the prompt template's own content in the
-    # cache key, not just its variable inputs. Without this, editing a
-    # judge prompt (wording fix, stricter rubric) silently reuses stale
-    # cached scores computed under the OLD prompt, which undermines the
-    # reproducibility R5 caching is meant to guarantee.
+    # Include the prompt template's own content in the cache key, not just
+    # its variable inputs. Without this, editing a judge prompt (wording
+    # fix, stricter rubric) would silently reuse stale cached scores
+    # computed under the OLD prompt, undermining the reproducibility this
+    # cache exists to guarantee.
     payload = json.dumps(
         {
             "judge_type": judge_type,
@@ -61,10 +61,10 @@ def _cache_key(judge_type: str, prompt_template: str, **fields: str) -> str:
 
 
 def _read_cache(key: str) -> dict | None:
-    # FIX (review #5): a cache file left truncated by an interrupted write
-    # (Ctrl-C mid-run) would previously raise JSONDecodeError here and crash
-    # the caller. Treat an unparseable cache file as a miss instead -- the
-    # judge call just re-runs and rewrites a good cache entry.
+    # A cache file left truncated by an interrupted write (Ctrl-C mid-run)
+    # would otherwise raise JSONDecodeError here and crash the caller. Treat
+    # an unparseable cache file as a miss instead -- the judge call just
+    # re-runs and rewrites a good cache entry.
     path = CACHE_DIR / f"{key}.json"
     if not path.exists():
         return None
@@ -75,9 +75,9 @@ def _read_cache(key: str) -> dict | None:
 
 
 def _write_cache(key: str, data: dict) -> None:
-    # FIX (review #5): write atomically. Writing directly to the final path
-    # risks leaving a truncated/corrupt file if the process is killed
-    # mid-write; write-to-temp-then-replace makes the write all-or-nothing.
+    # Write atomically. Writing directly to the final path risks leaving a
+    # truncated/corrupt file if the process is killed mid-write;
+    # write-to-temp-then-replace makes the write all-or-nothing.
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     final_path = CACHE_DIR / f"{key}.json"
     tmp_path = final_path.with_suffix(".json.tmp")
@@ -89,11 +89,10 @@ def _parse_json_response(text: str, judge_type: str) -> dict:
     """Judge prompts ask for a bare JSON object. Models occasionally wrap it
     in a code fence anyway, so strip that defensively before parsing.
 
-    FIX (review #2): previously this let json.JSONDecodeError / KeyError
-    propagate straight out of _call_judge with no context, crashing the
-    whole run_pattern() loop on one bad judge response. Now it raises a
-    JudgeParseError naming the judge type and the raw text, which
-    evals/run.py catches per-question instead of losing the entire run.
+    Raises a JudgeParseError naming the judge type and the raw text (rather
+    than letting json.JSONDecodeError / KeyError propagate with no context),
+    which evals/run.py catches per-question instead of losing the entire
+    run to one bad judge response.
     """
     stripped = text.strip()
     if stripped.startswith("```"):

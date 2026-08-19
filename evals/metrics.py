@@ -1,7 +1,7 @@
 """Deterministic metrics for scoring a RAG pattern against the eval set.
 
-All randomness (bootstrap resampling) is seeded to 42 per SPEC.md §11
-(Reproducibility rules).
+All randomness (bootstrap resampling) is seeded to 42 for reproducible
+results across runs.
 """
 
 from __future__ import annotations
@@ -42,10 +42,11 @@ def paper_hit_at_k(
 ) -> float:
     """Coarser than hit_at_k: 1.0 if ANY of the top-k retrieved chunks
     belongs to one of the relevant PAPERS (not necessarily the exact
-    ground-truth CHUNK). Needed for A1/A2 (SPEC.md §7): re-chunking the
-    corpus produces entirely different chunk_ids, so qa_set.jsonl's
-    relevant_chunk_ids can't be matched exactly across chunking variants --
-    paper_id is the one thing stable across every strategy.
+    ground-truth CHUNK). Needed for the chunking-strategy and embedding-swap
+    appendix studies: re-chunking the corpus produces entirely different
+    chunk_ids, so qa_set.jsonl's relevant_chunk_ids can't be matched exactly
+    across chunking variants -- paper_id is the one thing stable across
+    every strategy.
     """
     top_k_papers = {corpus_by_id[cid]["paper_id"] for cid in retrieved_ids[:k] if cid in corpus_by_id}
     return 1.0 if top_k_papers & relevant_paper_ids else 0.0
@@ -56,12 +57,12 @@ def filter_accuracy(extracted_filter: dict | None, requires_filter: dict | None)
     matches the ground-truth filter, else 0.0. Returns None if the question
     doesn't require a filter (so it can be excluded from the aggregate).
 
-    NOTE (review #7, documented not fixed): this is exact dict equality,
-    including value types -- {"year": "2024"} != {"year": 2024}. No
-    consumer exists yet (pattern 08 self-query lands in P4), so adding
-    type-coercion/normalization now would be speculative. Revisit this
-    once pattern 08's actual filter-extraction output shape is known,
-    rather than guessing a normalization scheme ahead of time.
+    NOTE (documented, not fixed): this is exact dict equality, including
+    value types -- {"year": "2024"} != {"year": 2024}. Adding
+    type-coercion/normalization here would be speculative without knowing
+    pattern 08's actual filter-extraction output shape, so it's left as
+    exact equality; revisit if a real run shows type mismatches causing
+    false negatives.
     """
     if requires_filter is None:
         return None
@@ -76,9 +77,8 @@ def bootstrap_ci(
 ) -> ConfidenceInterval:
     """95% bootstrap confidence interval over a list of per-question scores.
 
-    Required by SPEC.md §5 ("Statistical honesty") for every leaderboard
-    metric, since point estimates on 60 (or fewer, pilot-scale) samples are
-    easy to over-interpret.
+    Reported for every leaderboard metric, since point estimates on 60 (or
+    fewer, pilot-scale) samples are easy to over-interpret.
     """
     if not values:
         return ConfidenceInterval(mean=0.0, lower=0.0, upper=0.0)

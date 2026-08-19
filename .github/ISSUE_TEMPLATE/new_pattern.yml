@@ -28,8 +28,9 @@ body:
     attributes:
       label: Key claim to test
       description: >
-        What should this pattern win at, and what should it cost? (Matches the "Key claim to
-        test" column in SPEC.md §6's pattern table.)
+        What should this pattern win at, and what should it cost? (This is the same one-line
+        pitch every pattern in the README's pattern table has, e.g. "Beats either alone almost
+        always" for hybrid+RRF.)
     validations:
       required: true
   - type: checkboxes

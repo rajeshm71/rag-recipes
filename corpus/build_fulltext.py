@@ -1,10 +1,10 @@
 """One-off script: re-fetches the real, full PDF text for every paper_id
 already in corpus/corpus.jsonl (deterministic arXiv PDF URL from paper_id),
-and writes corpus/corpus_fulltext.jsonl. Run ONCE (P5), its output
-committed like corpus.jsonl itself (SPEC.md §19 Q1 precedent) --
-A1_chunking_study.ipynb loads the committed file and makes zero live
-network calls at notebook-execution time. Free (no API key), reuses
-corpus/build_corpus.py's existing download_pdf_text().
+and writes corpus/corpus_fulltext.jsonl. Run ONCE, its output committed
+pre-built like corpus.jsonl itself -- A1_chunking_study.ipynb loads the
+committed file and makes zero live network calls at notebook-execution
+time. Free (no API key), reuses corpus/build_corpus.py's existing
+download_pdf_text().
 """
 
 from __future__ import annotations

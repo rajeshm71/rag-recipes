@@ -1,10 +1,10 @@
 """Extracts inline [chunk_id] citations from an LLM's generated answer text.
 
-Shared by pattern 01 (naive dense) now and pattern 07 (contextual retrieval,
-P4) later, since both patterns' generation prompt (prompts/generation_prompt.txt)
+Shared by pattern 01 (naive dense) and pattern 07 (contextual retrieval),
+since both patterns' generation prompt (prompts/generation_prompt.txt)
 asks the model to cite sources as [chunk_id] inline. Kept as its own module
-rather than inline in a specific pattern file so it isn't a cross-pattern
-import once pattern 07 needs it too.
+rather than inline in a specific pattern file so it's a shared import, not
+duplicated logic across the two patterns that need it.
 """
 
 from __future__ import annotations

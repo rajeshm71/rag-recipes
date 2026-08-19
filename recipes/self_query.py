@@ -1,12 +1,12 @@
 """Pattern 08: metadata + self-query. Extracts a structured filter
 ({"category": ..., "year": ...}) from the question via an LLM call, using
-`prompts/self_query_prompt.txt` (auxiliary, NOT covered by R4 -- same
-reasoning as hyde_prompt.txt/multi_query_prompt.txt: this runs BEFORE
-retrieval, it's an input to what gets searched, not the generation step).
-Reports the extracted filter on AnswerWithCitations.extracted_filter, which
-evals/run.py's existing filter_accuracy() call already consumes -- no
-changes needed there, that plumbing has been in place since P1 and was
-simply unused until this pattern populates the field.
+`prompts/self_query_prompt.txt` (auxiliary, not the held-constant generation
+prompt -- same reasoning as hyde_prompt.txt/multi_query_prompt.txt: this
+runs BEFORE retrieval, it's an input to what gets searched, not the
+generation step). Reports the extracted filter on
+AnswerWithCitations.extracted_filter, which evals/run.py's existing
+filter_accuracy() call already consumes -- that plumbing predates this
+pattern and was simply unused until this pattern populates the field.
 """
 
 from __future__ import annotations

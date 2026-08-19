@@ -1,9 +1,10 @@
 """Shared "hybrid retrieval + cross-encoder rerank" retrieval-only helper.
 Used by A1 (chunking study) and A2 (embedding swap), which both hold this
-exact retrieval pattern constant per SPEC.md §7 and only vary chunking or
-embedding model respectively. Retrieval-only (no generation, no LLM calls
-at all) -- neither appendix needs an answer, just retrieved chunk_ids to
-score against the eval set via paper_hit_at_k.
+exact retrieval pattern constant and only vary chunking or embedding model
+respectively -- that's the whole point of each study: isolate one variable
+at a time. Retrieval-only (no generation, no LLM calls at all) -- neither
+appendix needs an answer, just retrieved chunk_ids to score against the
+eval set via paper_hit_at_k.
 """
 
 from __future__ import annotations

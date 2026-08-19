@@ -6,11 +6,12 @@ page covers the actual code and notebook structure.
 
 Before writing anything: open an issue and get a maintainer nod. New dependencies, framework
 integrations, and changes to the held-constant generation prompt all require prior discussion --
-see `SPEC.md` §22's R1-R12 for the full list of hard rules every pattern must follow.
+see [CONTRIBUTING.md](../CONTRIBUTING.md) for the full list of hard rules every pattern must
+follow.
 
 ## 1. The `recipes/<name>.py` contract
 
-Every pattern module exposes one factory function with this exact shape (per `SPEC.md` §16.3):
+Every pattern module exposes one factory function with this exact shape:
 
 ```python
 def make_retrieve_and_answer(
@@ -74,7 +75,7 @@ def make_retrieve_and_answer(
         context = "\n\n".join(
             f"[{cid}] {corpus_by_id[cid]['text']}" for cid in retrieved_ids if cid in corpus_by_id
         )
-        prompt = prompt_template.format(context=context, question=question)  # R4: held constant
+        prompt = prompt_template.format(context=context, question=question)  # held-constant prompt
         response = llm.complete(prompt=prompt, model=generation_model, temperature=0.0)
         latency_ms = (time.perf_counter() - start) * 1000
         return AnswerWithCitations(
@@ -89,10 +90,12 @@ def make_retrieve_and_answer(
     return retrieve_and_answer
 ```
 
-**R4 (`SPEC.md` §5):** the final answer-generation call must use `prompts/generation_prompt.txt`
-verbatim. If your pattern needs an auxiliary LLM call BEFORE retrieval (a query rewrite, a
-hypothetical-document generation, a decomposition) -- that's fine and not covered by R4, since it
-runs before "the generation step," not during it. Give it its own prompt file
+**Held-constant generation prompt:** the final answer-generation call must use
+`prompts/generation_prompt.txt` verbatim, for every pattern, with no exceptions -- this is what
+makes cross-pattern comparisons attributable to retrieval quality rather than prompt tuning. If
+your pattern needs an auxiliary LLM call BEFORE retrieval (a query rewrite, a
+hypothetical-document generation, a decomposition) -- that's fine, since it runs before "the
+generation step," not during it. Give it its own prompt file
 (`prompts/<name>_prompt.txt`) and say so explicitly in your module's docstring, matching the
 convention in `recipes/hyde.py`/`recipes/multi_query.py`.
 
@@ -124,8 +127,9 @@ Mandatory 8 sections, in this order, enforced by `scripts/lint_notebooks.py`:
 6. **Example query walkthrough** (one query per eval-set category)
 7. **Where this pattern FAILS** (at least 2 real, analyzed failures -- required, cannot be skipped)
 8. **Copy-paste snippet** (a markdown fenced code block, NOT a live-executed cell -- `corpus_by_id
-   = {}` as pseudo-code is a Python *set* literal if left as a real cell, not an empty dict; this
-   bit developers in P2, keep it a markdown block)
+   = {}` as pseudo-code is a Python *set* literal if papermill actually executes it, not an empty
+   dict, and will crash with `AttributeError: 'set' object has no attribute 'keys'`; keep it a
+   markdown block so it's never actually run)
 
 Precede section 1 with a reproducibility header cell (platform/python/key dep versions/git commit
 sha) and a dedicated Setup cell (loads `corpus_by_id`, `qa_set`, `llm`, `judge_llm` -- see any

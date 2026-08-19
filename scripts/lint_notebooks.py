@@ -1,7 +1,8 @@
-"""Enforces SPEC.md §8's mandatory 8-section template on the 10 pattern
+"""Enforces this repo's mandatory 8-section template on the 10 pattern
 notebooks (01-10). Appendix/baseline/leaderboard notebooks (00, 00b, A1,
-A2, 11) are explicitly exempt -- SPEC.md §7 states they are "not in the
-main leaderboard" / not one of "the 10 patterns."
+A2, 11) are explicitly exempt -- they're required deliverables in their
+own right, but aren't one of "the 10 patterns" and don't follow the same
+template.
 """
 
 from __future__ import annotations

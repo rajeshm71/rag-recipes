@@ -4,12 +4,12 @@ Requires the `corpus-build` optional dependency group:
     uv sync --extra corpus-build
 
 Queries arXiv's public Atom API for papers in the given categories, downloads
-each PDF, extracts text, and chunks it per SPEC.md §4's fixed policy: 512
+each PDF, extracts text, and chunks it per this project's fixed policy: 512
 tokens per chunk (tiktoken-counted), 64-token overlap, paragraph-boundary
 aware, at most 3 chunks kept per paper to avoid one-paper dominance.
 
-This script is shipped for transparency (SPEC.md §4) -- corpus.jsonl is
-committed pre-built and does NOT need to be regenerated on every install.
+This script is shipped for transparency -- corpus.jsonl is committed
+pre-built and does NOT need to be regenerated on every install.
 
 If a paper's PDF fails to download or its text fails to extract, that paper
 is skipped with a logged warning; the script keeps going and reports at the
@@ -148,12 +148,12 @@ def _split_oversized_paragraph(
     chunk_tokens. PDF text extraction frequently loses blank-line breaks
     (an entire page can come back as one "paragraph"), so paragraph-only
     splitting is not sufficient on its own -- without this fallback, chunks
-    silently blow past the target from SPEC.md §4.
+    silently blow past the target chunk size.
 
-    chunk_tokens/overlap_tokens default to the module constants (P1's
-    fixed 512/64 policy for the main corpus); P5's A1_chunking_study.ipynb
-    passes different values to build the fixed-256/512/1024 variants --
-    see corpus/chunking_strategies.py.
+    chunk_tokens/overlap_tokens default to the module constants (the fixed
+    512/64 policy used for the main corpus); A1_chunking_study.ipynb passes
+    different values to build the fixed-256/512/1024 variants -- see
+    corpus/chunking_strategies.py.
     """
     tokens = tokenizer.encode(para)
     if len(tokens) <= chunk_tokens:

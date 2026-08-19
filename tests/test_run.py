@@ -1,12 +1,10 @@
-"""End-to-end proof of the P1 acceptance criterion (SPEC.md §18):
-
-    "evals/run.py can score a dummy retrieval function end to end and
-    print all metrics with CIs."
+"""End-to-end proof that evals/run.py can score a dummy retrieval function
+end to end and print all metrics with CIs.
 
 Uses a dummy retrieval function (trivial keyword overlap, not a real
 pattern) and MockLLM wired in as BOTH the generation and judge backend, so
 this test proves the full run_pattern() orchestration -- retrieval metrics
-AND judge-derived metrics -- with zero real API calls (SPEC.md R8).
+AND judge-derived metrics -- with zero real API calls.
 """
 
 import json
@@ -129,8 +127,7 @@ def test_run_pattern_end_to_end_with_judges(capsys):
     assert result.p50_latency_ms >= 0.0
 
     # "print all metrics with CIs" -- verify the printed summary actually
-    # names every metric, per the literal wording of the P1 acceptance
-    # criterion.
+    # names every metric run_pattern() computes.
     printed = capsys.readouterr().out
     for label in [
         "hit@3",
@@ -192,13 +189,12 @@ def test_run_pattern_isolates_a_failing_question(capsys):
 
 
 def test_run_pattern_keeps_retrieval_scores_when_only_judging_fails(capsys):
-    """Regression test for a bug found while building 02_bm25.ipynb (P2):
-    a judge-call failure must NOT discard the retrieval scores for that
-    same question -- retrieval already succeeded and is real, valid data.
-    Previously a judge failure was folded into the same n_errors/"failed
-    and was skipped" path as a recipe_fn failure, which was both wrong
-    (real data thrown away) and misleading (the message implied nothing
-    was captured for that question, when hit@k/mrr were).
+    """A judge-call failure must NOT discard the retrieval scores for that
+    same question -- retrieval already succeeded and is real, valid data,
+    so a judge failure must not be folded into the same n_errors/"failed
+    and was skipped" path as a recipe_fn failure, which would both throw
+    away real data and mislead (implying nothing was captured for that
+    question, when hit@k/mrr were).
     """
     dummy_pattern = _dummy_pattern_factory()
     # Not valid JSON -- every judge call will raise JudgeParseError.
@@ -230,12 +226,12 @@ def test_run_pattern_keeps_retrieval_scores_when_only_judging_fails(capsys):
 
 
 def test_run_pattern_keeps_retrieval_scores_when_only_accounting_fails(capsys):
-    """Regression test for a bug found in code review: cost_usd() and
-    filter_accuracy() ran in the SAME try block as the hit@k/mrr/latency
-    appends, so a cost-accounting failure (e.g. an unpriced generation
-    model) would print "no retrieval data" even though retrieval scores
-    for that question were already appended and kept. Same bug shape as
-    the judge-error split above, applied to the accounting step.
+    """cost_usd() and filter_accuracy() must run in their own try block,
+    separate from the hit@k/mrr/latency appends, so a cost-accounting
+    failure (e.g. an unpriced generation model) doesn't print "no retrieval
+    data" when retrieval scores for that question were already appended and
+    kept. Same shape as the judge-error split above, applied to the
+    accounting step.
     """
     dummy_pattern = _dummy_pattern_factory()
 
@@ -271,16 +267,15 @@ def test_run_pattern_keeps_retrieval_scores_when_only_accounting_fails(capsys):
     assert result.eval_usd < 0.01  # sanity: nowhere near what generation cost would add
 
     printed = capsys.readouterr().err
-    # FIX (P4 code review): message widened from "cost/filter accounting
-    # failed" to "cost/filter/trace accounting failed" when the trace write
-    # was folded into this same try/except -- update the assertion to match.
+    # The trace write shares this same try/except, so the message covers
+    # cost/filter/trace accounting together, not just cost/filter.
     assert "retrieval succeeded but cost/filter/trace accounting failed" in printed
     assert "failed and was skipped (no retrieval data)" not in printed
 
 
 def test_run_pattern_writes_tool_call_traces_when_path_given(tmp_path):
-    """Regression test for P4 (pattern 10): trace_output_path, when given,
-    must get one JSON line per question with a non-empty tool_call_trace.
+    """trace_output_path, when given, must get one JSON line per question
+    with a non-empty tool_call_trace.
     """
     gen_llm = MockLLM(default_response="answer")
 
@@ -316,13 +311,10 @@ def test_run_pattern_writes_tool_call_traces_when_path_given(tmp_path):
 
 
 def test_run_pattern_keeps_retrieval_scores_when_only_trace_write_fails(capsys, tmp_path):
-    """Regression test for the P4 code-review fix: the trace-file write was
-    originally inside the SAME try block as the hit@k/mrr/latency appends,
-    so a trace-serialization failure (e.g. a non-JSON-serializable value in
-    tool_call_trace) would have been misattributed as a full recipe_fn
-    failure, discarding real retrieval scores -- the exact bug shape
-    n_judge_errors/n_accounting_errors were already introduced to fix
-    elsewhere. Moving the write into the accounting try/except closes it.
+    """The trace-file write must live in the accounting try/except, not the
+    recipe_fn try block -- otherwise a trace-serialization failure (e.g. a
+    non-JSON-serializable value in tool_call_trace) would be misattributed
+    as a full recipe_fn failure, discarding real retrieval scores.
     """
     gen_llm = MockLLM(default_response="answer")
 

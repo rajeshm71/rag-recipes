@@ -1,8 +1,8 @@
 """Regression coverage for corpus/build_corpus.py's chunking logic.
 
 corpus/build_corpus.py is not part of the recipes/evals package (it's a
-one-off script gated behind the corpus-build optional dependency group,
-per SPEC.md §4), so it's imported directly by path here.
+one-off script gated behind the corpus-build optional dependency group),
+so it's imported directly by path here.
 """
 
 import sys

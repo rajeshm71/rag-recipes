@@ -68,11 +68,9 @@ class VectorStore:
         self._conn.commit()
 
     def add_many(self, chunk_ids: list[str], vectors: list[list[float]]) -> None:
-        # FIX (review #4): commit once for the whole batch instead of once
-        # per row (previously add_many() looped calling add(), which
-        # commits -- i.e. fsyncs -- after every single insert). At the
-        # pilot's 54 chunks this was invisible; at the full 300-chunk
-        # target it's ~2x more fsync-bound commits than necessary.
+        # Commit once for the whole batch rather than once per row --
+        # looping a per-row add()+commit() means an fsync after every
+        # single insert, which scales badly as the corpus grows.
         for chunk_id, vector in zip(chunk_ids, vectors):
             self._insert(chunk_id, vector)
         self._conn.commit()

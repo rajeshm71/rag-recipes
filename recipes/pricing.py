@@ -5,8 +5,9 @@ platform.openai.com/docs/pricing on 2026-08-11. Anthropic (claude-sonnet-5)
 verified against platform.claude.com/docs/en/about-claude/models/overview
 (base rate) and .../build-with-claude/prompt-caching (cache multipliers:
 write 5-min TTL = 1.25x base input, read = 0.1x base input) on 2026-08-12.
-Re-verify before relying on these for a real spend decision if this file is
-more than a few weeks old, per SKILL.md's Currency and Research rule.
+Re-verify against the vendors' own pricing pages before relying on these for
+a real spend decision if this file is more than a few weeks old -- provider
+pricing changes without notice.
 
 All prices are USD per 1,000,000 tokens.
 """

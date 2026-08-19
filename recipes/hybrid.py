@@ -26,7 +26,7 @@ CANDIDATES_PER_RANKER = 20
 def rrf_fuse(ranked_lists: list[list[str]], k: int, rrf_k: int = RRF_K) -> list[str]:
     """Reciprocal Rank Fusion over any number of ranked chunk_id lists.
 
-    Extracted from make_retrieve_and_answer's inline fusion loop (P5) so
+    Extracted from make_retrieve_and_answer's inline fusion loop so
     recipes/hybrid_rerank.py (used by the A1/A2 appendix studies) can reuse
     the exact same fusion math instead of duplicating it.
     """

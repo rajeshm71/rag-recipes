@@ -43,9 +43,11 @@ of these.
 7. Run locally before opening a PR: `ruff check .`, `python scripts/lint_notebooks.py`, `pytest
    tests/`, and a `papermill` smoke run with `RAG_RECIPES_LLM=mock`.
 8. Open a PR against `main` using the PR template. Link the issue from step 1.
-9. CI must be green. A maintainer reviews for: does it follow R1-R12 in `SPEC.md` §22 (dependency
-   budget, prompt held constant, cost transparency, etc.), does the notebook read well, is the
-   failure-mode section honest.
+9. CI must be green. A maintainer reviews for: does it stay within the project's hard rules
+   (dependency budget of ≤12 top-level runtime deps, no LangChain/LlamaIndex/framework
+   abstraction, pinned dated model snapshots, the held-constant generation prompt used verbatim,
+   cost printed at the end of the notebook), does the notebook read well, is the failure-mode
+   section honest.
 10. Once approved, a maintainer merges via squash merge to keep `main` history clean.
 
 ## Fixing a bug

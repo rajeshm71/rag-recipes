@@ -1,10 +1,10 @@
 """Thin wrapper around rank_bm25 for keyword/sparse retrieval.
 
 Also serves as pattern 02's recipe module (make_retrieve_and_answer below):
-SPEC.md's file tree (§9) lists a single recipes/bm25.py serving both roles
-(the low-level BM25Index infrastructure from P1, and the pattern-facing
-recipe function), so both live here rather than splitting into a file the
-spec's tree doesn't name.
+the low-level BM25Index infrastructure and the pattern-facing recipe
+function both live here rather than splitting into a separate file, since
+BM25 itself is the entire pattern -- no other pattern module needs to
+import BM25Index directly.
 """
 
 from __future__ import annotations

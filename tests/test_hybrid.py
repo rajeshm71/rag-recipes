@@ -103,9 +103,9 @@ def test_rrf_k_is_wired_into_the_fusion_formula():
 
 
 def test_rrf_fuse_is_genuinely_n_ary():
-    # P5: rrf_fuse was extracted from this file's inline fusion loop for
-    # reuse by recipes/hybrid_rerank.py (A1/A2 appendices). This pattern's
-    # own usage only ever passes 2 lists, but the function itself must not
+    # rrf_fuse was extracted from this file's inline fusion loop for reuse
+    # by recipes/hybrid_rerank.py (A1/A2 appendices). This pattern's own
+    # usage only ever passes 2 lists, but the function itself must not
     # assume that -- verify a 3-list fusion combines all three properly.
     list_a = ["c1", "c2", "c3"]
     list_b = ["c3", "c1", "c2"]

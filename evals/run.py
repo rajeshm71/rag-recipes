@@ -1,10 +1,11 @@
 """Eval harness orchestrator. Scores one RAG pattern's recipe function
-against the eval set and returns every metric from SPEC.md §5, each with a
-95% bootstrap confidence interval.
+against the eval set and returns every metric (hit@k, MRR, LLM-judged
+faithfulness/relevance/citation accuracy, latency, cost), each with a 95%
+bootstrap confidence interval.
 
-This is the file whose behavior is the literal P1 acceptance criterion
-(SPEC.md §18): "evals/run.py can score a dummy retrieval function end to
-end and print all metrics with CIs."
+This is the file whose core job is: score a dummy retrieval function end
+to end and print all metrics with CIs -- every pattern notebook's "Run on
+our eval set" section is a thin wrapper around this one function.
 """
 
 from __future__ import annotations
@@ -50,29 +51,24 @@ class PatternResult:
     p95_latency_ms: float
     usd_per_query: float
     eval_usd: float
-    # FIX (review #3): count of questions skipped entirely because
-    # recipe_fn itself raised (no data at all for that question). Defaults
-    # to 0 so existing call sites/tests that don't reference this field are
-    # unaffected.
+    # Count of questions skipped entirely because recipe_fn itself raised
+    # (no data at all for that question). Defaults to 0 so existing call
+    # sites/tests that don't reference this field are unaffected.
     n_errors: int = 0
-    # FIX (P2, evals/run.py bug found while building 02_bm25.ipynb): a
-    # judge-call failure is NOT the same situation as a recipe_fn failure --
-    # retrieval already succeeded and its scores are real, valid data. This
-    # counts questions where retrieval succeeded but one or more judge
-    # calls failed, so faithfulness/answer_relevance/citation_accuracy may
-    # be computed over fewer questions than hit@k/mrr. Previously this case
-    # was folded into n_errors with a misleading "failed and was skipped"
-    # message, even though the retrieval score for that question was kept.
+    # A judge-call failure is NOT the same situation as a recipe_fn
+    # failure -- retrieval already succeeded and its scores are real, valid
+    # data. This counts questions where retrieval succeeded but one or more
+    # judge calls failed, so faithfulness/answer_relevance/citation_accuracy
+    # may be computed over fewer questions than hit@k/mrr, tracked
+    # separately from n_errors so the message stays accurate: the retrieval
+    # score for that question is still kept even when judging fails.
     n_judge_errors: int = 0
-    # FIX (code review, same bug class as n_judge_errors): cost accounting
-    # (cost_usd), filter-accuracy scoring, and (as of P4) the tool-call
-    # trace-file write all happened in the SAME try block as the
-    # hit@k/mrr/latency appends, so a failure in any of those later steps
-    # would still print "no retrieval data" even though the retrieval
-    # scores were already appended and kept. Not reachable today (P2's
-    # patterns hardcode a valid, priced generation model; P4's
-    # tool_call_trace entries are always JSON-serializable), but the same
-    # latent-bug shape the judge split already fixed elsewhere.
+    # Same reasoning as n_judge_errors, for a different step: cost
+    # accounting (cost_usd), filter-accuracy scoring, and the tool-call
+    # trace-file write all happen in their own try block, separate from the
+    # hit@k/mrr/latency appends -- a failure in any of those later steps
+    # must not misreport "no retrieval data" when the retrieval scores were
+    # already appended and kept.
     n_accounting_errors: int = 0
 
 
@@ -116,14 +112,15 @@ def run_pattern(
     judges_enabled: bool = True,
     k: int = 10,
     verbose: bool = True,
-    # NEW (P4, pattern 10): when given, every question whose
-    # result.tool_call_trace is non-empty gets appended as one JSON line
-    # here. Every other pattern leaves this None, so this is a
-    # zero-behavior-change default for the 9 patterns that don't use it.
+    # When given (only pattern 10, agentic, passes this), every question
+    # whose result.tool_call_trace is non-empty gets appended as one JSON
+    # line here. Every other pattern leaves this None, so this is a
+    # zero-behavior-change default for patterns that don't use it.
     trace_output_path: str | Path | None = None,
 ) -> PatternResult:
     """Run `recipe_fn` over every question in `qa_set`, score it against
-    every metric in SPEC.md §5, and return the aggregated result.
+    every metric this project reports (hit@k, MRR, judge scores, filter
+    accuracy, latency, cost), and return the aggregated result.
 
     `recipe_fn` must match the AnswerWithCitations contract from
     recipes/__init__.py: `recipe_fn(question: str, k: int) -> AnswerWithCitations`.
@@ -142,10 +139,10 @@ def run_pattern(
     n_judge_errors = 0
     n_accounting_errors = 0
 
-    # NEW (P4): open in "w" mode (truncate) so re-running a notebook cell
-    # doesn't silently accumulate stale entries from a previous run -- same
-    # "clean run" principle SPEC.md §19 Q4 already applies to every other
-    # committed notebook output.
+    # Open in "w" mode (truncate) so re-running a notebook cell doesn't
+    # silently accumulate stale entries from a previous run -- notebooks
+    # are committed with clean-run outputs, and this file should be no
+    # different.
     # Can't use `with` here -- this must stay open across the whole
     # per-question loop below; correctly closed in the `finally` block.
     trace_file = (
@@ -160,10 +157,10 @@ def run_pattern(
             relevant_ids = record["relevant_chunk_ids"]
             requires_filter = record.get("requires_filter")
 
-            # FIX (review #3): isolate each question so one bad recipe_fn call
-            # doesn't lose every score already collected for prior questions in
-            # this run. Previously an uncaught exception here would propagate
-            # straight out of run_pattern and discard the whole run -- costly
+            # Isolate each question so one bad recipe_fn call doesn't lose
+            # every score already collected for prior questions in this run
+            # -- an uncaught exception here would otherwise propagate
+            # straight out of run_pattern and discard the whole run, costly
             # for a real, paid eval run against real APIs. This block covers
             # ONLY recipe_fn itself plus the minimal hit@k/mrr/latency scoring
             # that depends solely on its return value -- cost accounting, filter
@@ -183,21 +180,13 @@ def run_pattern(
                 print(f"  WARNING: question {qid!r} failed and was skipped (no retrieval data): {exc}", file=sys.stderr)
                 continue
 
-            # FIX (P4 code review): cost accounting, filter scoring, AND the
-            # trace-file write are all their own try/except, separate from
-            # the hit@k/mrr appends above. A failure here (e.g. an unpriced
-            # generation_model, or -- the bug this fix addresses -- a
+            # Cost accounting, filter scoring, AND the trace-file write are
+            # all their own try/except, separate from the hit@k/mrr appends
+            # above. A failure here (e.g. an unpriced generation_model, or a
             # trace-serialization failure) must not be reported as "no
             # retrieval data": the retrieval scores above were already
-            # appended and are kept regardless. The trace write was
-            # originally inside the recipe_fn try block above; that had the
-            # exact same latent-bug shape n_judge_errors/n_accounting_errors
-            # were already introduced to fix -- a json.dumps() or file-write
-            # failure would have been misattributed as a full recipe_fn
-            # failure, discarding real retrieval scores. Not reachable today
-            # (agentic.py's tool_call_trace entries are always plain dicts
-            # of strings, always JSON-serializable), but closes the same
-            # risk class before a future pattern's trace shape changes that.
+            # appended and are kept regardless, so this needs its own error
+            # counter and message distinct from a full recipe_fn failure.
             try:
                 generation_usd_total += cost_usd(
                     generation_model,
@@ -223,13 +212,12 @@ def run_pattern(
             if not judges_enabled:
                 continue
 
-            # FIX (P2, evals/run.py bug found while building 02_bm25.ipynb):
-            # separate try/except so a judge failure only drops THIS question's
-            # judge scores, not the retrieval scores already appended above.
-            # The old single try/except wrapped both, so a judge-only failure
-            # incremented n_errors and printed "failed and was skipped" even
-            # though hit@k/mrr for that question were real, valid, and kept --
-            # a misleading message for what actually happened.
+            # Separate try/except so a judge failure only drops THIS
+            # question's judge scores, not the retrieval scores already
+            # appended above -- a judge-only failure must not be reported
+            # via the same "failed and was skipped" message used for a full
+            # recipe_fn failure, since hit@k/mrr for that question are real,
+            # valid, and kept regardless.
             try:
                 context = _build_context(result.retrieved_chunk_ids, corpus_by_id)
 

@@ -5,12 +5,14 @@ pattern into your own project.
 
 ## Project status
 
-The pipeline is fully built: all 10 patterns, 2 baselines, 2 appendix studies, and the leaderboard
-below all run end to end. **The leaderboard numbers below are currently illustrative (mock), not
-real retrieval-quality results** -- this repo hasn't yet been run against a real OpenAI/Anthropic
-key. The mock run proves every pattern, metric, and the aggregation pipeline itself work correctly;
-it does not tell you which pattern actually retrieves or answers better. See
-[`tasks/todo.md`](tasks/todo.md) for the tracked real-key run this repo is waiting on.
+The pipeline is fully built and has been run for real: **11 of the 12 leaderboard rows below are
+real retrieval-quality results** (real `text-embedding-3-small` embeddings, real `gpt-4.1-mini`
+generation, real `gpt-5.4-mini` judging) against this repo's 54-chunk pilot corpus. Pattern 07
+(contextual retrieval) still shows mock numbers -- it needs `ANTHROPIC_API_KEY`, which hasn't been
+run yet. The A1 chunking study is fully real (all 6 variants); A2's embedding swap has its OpenAI
+row real, with the Voyage and local-model rows still pending. Scores below are honest for this
+pilot-scale corpus, not the larger corpus this project could eventually scale to -- see "How the
+eval works" for the actual numbers.
 
 ## Leaderboard
 
@@ -43,13 +45,14 @@ jupyter lab notebooks/
 
 ## Cost warning
 
-**Not yet measured against a real run** -- SPEC's own pre-verification estimate: a full leaderboard
-reproduction (60-question eval set × 12 patterns/baselines × generation + 3 judge metrics each,
-target scale) lands in the **$3-5** range once judge calls (not generation) dominate the cost, using
-`gpt-4.1-mini-2025-04-14` for generation and `gpt-5.4-mini-2026-03-17` for judging. The actual
-measured `eval_usd` from a real run will replace this estimate once one exists (tracked in
-[`tasks/todo.md`](tasks/todo.md)). Judge calls are cached to disk (`outputs/.judge_cache/`) so
-re-running a notebook doesn't re-bill identical judge calls.
+**Measured, not estimated:** a clean-cache run of the full leaderboard (18-question pilot eval set
+× 12 patterns/baselines, 11 of them real) cost **$1.89** in `eval_usd`, using
+`gpt-4.1-mini-2025-04-14` for generation and `gpt-5.4-mini-2026-03-17` for judging. This is the
+pilot-scale (54-chunk corpus, 18 questions) figure, not the larger scale this project could
+eventually grow into -- a bigger corpus and eval set would cost proportionally more, since judge
+calls (not generation) dominate the cost. Judge calls are cached to disk
+(`outputs/.judge_cache/`) so re-running a notebook doesn't re-bill identical judge calls; delete
+that directory first if you want a genuine from-scratch cost figure of your own.
 
 ## Which pattern should I use?
 
@@ -83,8 +86,8 @@ project, copy the file directly -- this repo is a recipe collection, not an inst
 
 ## How the eval works
 
-Current pilot-scale corpus and eval set (scaling to the full target is tracked in
-[`tasks/todo.md`](tasks/todo.md)):
+Current pilot-scale corpus and eval set (scaling this up to a larger corpus/eval set is a possible
+future direction):
 
 - **Corpus:** [`corpus/corpus.jsonl`](corpus/corpus.jsonl) -- 54 chunks from 18 real arXiv papers
   (`cs.CL`/`cs.LG`/`cs.AI`, 2025), built by [`corpus/build_corpus.py`](corpus/build_corpus.py) and
