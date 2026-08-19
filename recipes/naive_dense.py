@@ -2,8 +2,8 @@
 
 Embed the question, embed every corpus chunk, retrieve the top-k nearest by
 cosine/L2 distance (via recipes/store.py's sqlite-vec wrapper), stuff the
-retrieved chunks into the held-constant generation prompt (R4), and ask the
-LLM to answer.
+retrieved chunks into the held-constant generation prompt, and ask the LLM
+to answer.
 
 Baseline pattern. Fails on rare terms / exact identifiers that dense
 embeddings don't represent distinctly (see 01_naive_dense.ipynb's "Where

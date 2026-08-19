@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v10.0.1
       - run: uv python install 3.12
       - run: uv sync
       - run: uv run ruff check .
@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v10.0.1
       - run: uv python install 3.12
       - run: uv sync
       - run: uv run pytest tests/
@@ -28,12 +28,12 @@ jobs:
   notebooks-smoke:
     runs-on: ubuntu-latest
     env:
-      # R8: CI is mock-only. No real API key is ever referenced or needed
-      # as a secret for this job.
+      # CI is mock-only. No real API key is ever referenced or needed as a
+      # secret for this job.
       RAG_RECIPES_LLM: mock
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v10.0.1
       - run: uv python install 3.12
       # --extra corpus-build: A1_chunking_study.ipynb needs tiktoken to
       # re-chunk the committed corpus/corpus_fulltext.jsonl; harmless
