@@ -33,12 +33,16 @@ of these.
    not covered by the existing 10. Wait for a maintainer nod before writing code, to avoid wasted
    work.
 2. Fork the repo, create a branch named `pattern/<short-name>` off `main`.
-3. Add `recipes/<name>.py` with function `retrieve_and_answer(question: str, k: int = 5) ->
-   AnswerWithCitations`. Follow the shape of an existing recipe file (e.g. `recipes/hybrid.py`) for
-   the interface. See `docs/adding_a_pattern.md` for a full template and checklist.
+3. Add `recipes/<name>.py` with a factory `make_retrieve_and_answer(corpus_by_id, llm, ...)` that
+   builds any index once and returns a `retrieve_and_answer(question: str, k: int = 5) ->
+   AnswerWithCitations` closure. Follow the shape of an existing recipe file (e.g.
+   `recipes/hybrid.py`) for the interface. See `docs/adding_a_pattern.md` for a full template and
+   checklist.
 4. Add `notebooks/<NN>_<name>.ipynb` following the mandatory 8-section template (see
    `docs/adding_a_pattern.md`), including the required "Where this pattern FAILS" section.
-5. Extend `notebooks/11_leaderboard.ipynb` to include the new row.
+5. Extend `notebooks/11_leaderboard.ipynb` to include the new row. If the pattern's retrieval step
+   needs no LLM, also add it to `evals/retrieval_leaderboard.py` and regenerate the committed table
+   with `uv run python evals/retrieval_leaderboard.py` (CI checks it on every push).
 6. Add a decision node to `docs/choosing.md` if the pattern changes the recommendation logic.
 7. Run locally before opening a PR: `ruff check .`, `python scripts/lint_notebooks.py`, `pytest
    tests/`, and a `papermill` smoke run with `RAG_RECIPES_LLM=mock`.

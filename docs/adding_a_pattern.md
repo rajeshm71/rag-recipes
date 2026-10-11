@@ -117,7 +117,9 @@ never real API calls in the test suite. At minimum:
 
 ## 3. The notebook (`notebooks/<NN>_<name>.ipynb`)
 
-Mandatory 8 sections, in this order, enforced by `scripts/lint_notebooks.py`:
+Mandatory 8 sections, in this order. `scripts/lint_notebooks.py` checks that the headers are
+present, in order, and titled correctly; the content requirements listed with each section are
+checked in review, not by the lint:
 
 1. **What this pattern does** (3 sentences, plain English)
 2. **When to use it** (bullet list)
