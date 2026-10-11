@@ -37,6 +37,16 @@ def mrr(retrieved_ids: list[str], relevant_ids: list[str]) -> float:
     return 0.0
 
 
+def recall_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
+    """Fraction of relevant_ids that appear in the top-k retrieved_ids. Unlike
+    hit@k, a multi-chunk question only scores 1.0 when every relevant chunk
+    was retrieved."""
+    relevant = set(relevant_ids)
+    if not relevant:
+        return 0.0
+    return len(set(retrieved_ids[:k]) & relevant) / len(relevant)
+
+
 def paper_hit_at_k(
     retrieved_ids: list[str], relevant_paper_ids: set[str], corpus_by_id: dict[str, dict], k: int
 ) -> float:
@@ -54,17 +64,21 @@ def paper_hit_at_k(
 
 def filter_accuracy(extracted_filter: dict | None, requires_filter: dict | None) -> float | None:
     """For pattern 08 (self-query): 1.0 if the extracted filter exactly
-    matches the ground-truth filter, else 0.0. Returns None if the question
-    doesn't require a filter (so it can be excluded from the aggregate).
+    matches the ground-truth filter, else 0.0.
 
-    NOTE (documented, not fixed): this is exact dict equality, including
-    value types -- {"year": "2024"} != {"year": 2024}. Adding
-    type-coercion/normalization here would be speculative without knowing
-    pattern 08's actual filter-extraction output shape, so it's left as
-    exact equality; revisit if a real run shows type mismatches causing
-    false negatives.
+    Returns None (excluded from the aggregate) in two cases: the question
+    doesn't require a filter, or the pattern made no filter claim at all
+    (`extracted_filter is None`, the default every pattern except 08 leaves
+    it at). The second case is "not applicable", not a wrong answer: scoring
+    it 0.0 would print a measured-looking 0.000 for patterns that never try
+    to filter. A pattern that DID try and extracted nothing reports {} and
+    is scored 0.0.
+
+    Comparison is exact dict equality, including value types. Pattern 08's
+    parser normalizes types (year to int) before reporting, so a mismatch
+    here is a genuinely wrong filter.
     """
-    if requires_filter is None:
+    if requires_filter is None or extracted_filter is None:
         return None
     return 1.0 if extracted_filter == requires_filter else 0.0
 

@@ -14,7 +14,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from recipes.llm import LLM
+from recipes.llm import LLM, MockLLM
 from recipes.pricing import cost_usd
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -102,7 +102,13 @@ def _parse_json_response(text: str, judge_type: str) -> dict:
         stripped = stripped.strip()
     try:
         parsed = json.loads(stripped)
-        return {"score": float(parsed["score"]), "reasoning": str(parsed["reasoning"])}
+        score = float(parsed["score"])
+        if not 0.0 <= score <= 1.0:
+            # Every judge rubric is scored on [0, 1]; an out-of-range value
+            # would silently skew the mean rather than being a visible
+            # per-question judge failure.
+            raise ValueError(f"score {score} outside [0, 1]")
+        return {"score": score, "reasoning": str(parsed["reasoning"])}
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise JudgeParseError(
             f"{judge_type} judge returned unparseable response: {exc}. Raw text: {text!r}"
@@ -114,7 +120,11 @@ def _call_judge(
 ) -> JudgeResult:
     template = _load_prompt(prompt_file)
     key = _cache_key(judge_type, prompt_template=template, **cache_fields)
-    cached = _read_cache(key)
+    # MockLLM's canned scores aren't measurements. They'd be written under
+    # the same key a real judge call with identical inputs would use, so a
+    # local mock run must never touch the on-disk cache in either direction.
+    use_cache = not isinstance(llm, MockLLM)
+    cached = _read_cache(key) if use_cache else None
     if cached is not None:
         return JudgeResult(
             score=cached["score"],
@@ -135,7 +145,8 @@ def _call_judge(
         output_tokens=response.output_tokens,
         cached_input_tokens=response.cached_input_tokens,
     )
-    _write_cache(key, result)
+    if use_cache:
+        _write_cache(key, result)
     return JudgeResult(score=result["score"], reasoning=result["reasoning"], usd_cost=usd, from_cache=False)
 
 

@@ -1,6 +1,6 @@
-"""Regression coverage for the review fixes applied to evals/judges.py:
-cache-key template versioning (#1), robust JSON parsing (#2), and atomic
-cache writes (#5).
+"""Coverage for evals/judges.py: cache-key template versioning, robust
+JSON parsing, score range checking, atomic cache writes, and the rule that
+mock judge calls never touch the on-disk cache.
 """
 
 import pytest
@@ -11,7 +11,9 @@ from evals.judges import (
     _parse_json_response,
     _read_cache,
     _write_cache,
+    judge_answer_relevance,
 )
+from recipes.llm import MockLLM
 
 
 def test_cache_key_changes_when_prompt_template_changes():
@@ -45,6 +47,27 @@ def test_parse_json_response_raises_judge_parse_error_on_garbage():
 def test_parse_json_response_raises_judge_parse_error_on_missing_fields():
     with pytest.raises(JudgeParseError):
         _parse_json_response('{"unexpected": "shape"}', "faithfulness")
+
+
+@pytest.mark.parametrize("score", ["5", "-0.5", "1.01"])
+def test_parse_json_response_rejects_out_of_range_score(score):
+    with pytest.raises(JudgeParseError):
+        _parse_json_response('{"score": ' + score + ', "reasoning": "r"}', "faithfulness")
+
+
+def test_mock_judge_calls_never_touch_the_cache(tmp_path, monkeypatch):
+    import evals.judges as judges_module
+
+    monkeypatch.setattr(judges_module, "CACHE_DIR", tmp_path)
+    llm = MockLLM(default_response='{"score": 1, "reasoning": "canned"}')
+
+    first = judge_answer_relevance(llm, "q", "a")
+    second = judge_answer_relevance(llm, "q", "a")
+
+    assert first.from_cache is False
+    assert second.from_cache is False  # a real backend would have hit the cache here
+    assert len(llm.calls) == 2
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_read_cache_treats_corrupt_file_as_miss(tmp_path, monkeypatch):

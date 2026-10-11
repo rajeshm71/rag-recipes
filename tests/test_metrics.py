@@ -5,6 +5,7 @@ from evals.metrics import (
     latency_percentiles,
     mrr,
     paper_hit_at_k,
+    recall_at_k,
 )
 
 PAPER_CORPUS = {
@@ -39,6 +40,13 @@ def test_mrr_not_found():
     assert mrr(["a", "b", "c"], ["z"]) == 0.0
 
 
+def test_recall_at_k_partial_and_full():
+    assert recall_at_k(["a", "b", "c"], ["a", "z"], k=3) == 0.5
+    assert recall_at_k(["a", "b", "z"], ["a", "z"], k=3) == 1.0
+    assert recall_at_k(["a", "b", "z"], ["a", "z"], k=2) == 0.5
+    assert recall_at_k(["a"], [], k=3) == 0.0
+
+
 def test_paper_hit_at_k_hit():
     # Retrieved chunk_id is a DIFFERENT id than any relevant_chunk_id, but
     # shares the same paper_id -- this is the exact case the metric exists
@@ -70,6 +78,17 @@ def test_filter_accuracy_match():
 
 def test_filter_accuracy_mismatch():
     assert filter_accuracy({"year": 2023}, {"year": 2024}) == 0.0
+
+
+def test_filter_accuracy_none_when_pattern_made_no_claim():
+    # Every pattern except 08 leaves extracted_filter at None: not
+    # applicable, not a miss.
+    assert filter_accuracy(None, {"year": 2024}) is None
+
+
+def test_filter_accuracy_empty_claim_is_a_miss():
+    # The pattern tried to extract a filter and found nothing: a real 0.
+    assert filter_accuracy({}, {"year": 2024}) == 0.0
 
 
 def test_bootstrap_ci_deterministic_with_seed():

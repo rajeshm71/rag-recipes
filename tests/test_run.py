@@ -160,8 +160,9 @@ def test_run_pattern_judges_disabled_are_none():
 
 
 def test_run_pattern_isolates_a_failing_question(capsys):
-    """Regression test for review fix #3: one recipe_fn failure must not
-    lose the scores already collected for other questions in the run.
+    """One recipe_fn failure must not lose the scores already collected
+    for other questions in the run, and the failed question itself must
+    count as a retrieval miss rather than silently vanish from hit@k/mrr.
     """
 
     def flaky_pattern(question: str, k: int = 5):
@@ -181,11 +182,14 @@ def test_run_pattern_isolates_a_failing_question(capsys):
     # One of the two fixture questions failed; the other's scores must
     # still be present, not discarded.
     assert result.n_errors == 1
-    assert result.hit_at_3.mean >= 0.0
     assert result.faithfulness is not None
+    # q1 failed (scored 0.0) and q2 hit, so hit@3 over both is exactly 0.5.
+    # Dropping the failure instead would report 1.0.
+    assert result.hit_at_3.mean == 0.5
+    assert result.hit_at_10.mean == 0.5
 
     printed = capsys.readouterr().err
-    assert "failed and was skipped" in printed
+    assert "recipe_fn failed; scored 0.0" in printed
 
 
 def test_run_pattern_keeps_retrieval_scores_when_only_judging_fails(capsys):
@@ -222,7 +226,7 @@ def test_run_pattern_keeps_retrieval_scores_when_only_judging_fails(capsys):
 
     printed = capsys.readouterr().err
     assert "retrieval succeeded but judging failed" in printed
-    assert "failed and was skipped (no retrieval data)" not in printed
+    assert "recipe_fn failed" not in printed
 
 
 def test_run_pattern_keeps_retrieval_scores_when_only_accounting_fails(capsys):
@@ -270,7 +274,7 @@ def test_run_pattern_keeps_retrieval_scores_when_only_accounting_fails(capsys):
     # The trace write shares this same try/except, so the message covers
     # cost/filter/trace accounting together, not just cost/filter.
     assert "retrieval succeeded but cost/filter/trace accounting failed" in printed
-    assert "failed and was skipped (no retrieval data)" not in printed
+    assert "recipe_fn failed" not in printed
 
 
 def test_run_pattern_writes_tool_call_traces_when_path_given(tmp_path):
@@ -357,7 +361,43 @@ def test_run_pattern_keeps_retrieval_scores_when_only_trace_write_fails(capsys, 
 
     printed = capsys.readouterr().err
     assert "retrieval succeeded but cost/filter/trace accounting failed" in printed
-    assert "failed and was skipped (no retrieval data)" not in printed
+    assert "recipe_fn failed" not in printed
+
+
+def test_run_pattern_usd_per_query_is_generation_cost_over_scored_questions():
+    """usd_per_query is the PATTERN's cost: generation only, averaged over
+    the questions that actually ran. Judge cost is eval overhead (and is 0
+    on a cache hit, so folding it in would make the column depend on local
+    cache state); a failed question contributes no cost and must not
+    dilute the average either.
+    """
+
+    def flaky_priced_pattern(question: str, k: int = 5) -> AnswerWithCitations:
+        if question == FIXTURE_QA_SET[0]["question"]:
+            raise RuntimeError("simulated recipe failure")
+        return AnswerWithCitations(
+            answer="answer [c2]",
+            retrieved_chunk_ids=["c2"],
+            latency_ms=1.0,
+            input_tokens=1_000_000,  # exactly $0.40 at gpt-4.1-mini's input rate
+            output_tokens=0,
+        )
+
+    result = run_pattern(
+        recipe_fn=flaky_priced_pattern,
+        qa_set=FIXTURE_QA_SET,
+        corpus_by_id=FIXTURE_CORPUS,
+        llm=MockLLM(default_response='{"score": 1, "reasoning": "fine"}'),
+        judges_enabled=True,
+        verbose=False,
+    )
+
+    assert result.n_errors == 1
+    assert result.generation_usd == 0.40
+    assert result.judge_usd > 0.0
+    # One scored question at $0.40, not ($0.40 + judge cost) / 2.
+    assert result.usd_per_query == 0.40
+    assert result.eval_usd == result.generation_usd + result.judge_usd
 
 
 def test_run_pattern_prices_cache_creation_tokens():

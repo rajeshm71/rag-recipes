@@ -49,7 +49,12 @@ class PatternResult:
     filter_accuracy: ConfidenceInterval | None
     p50_latency_ms: float
     p95_latency_ms: float
+    # The pattern's own cost: generation_usd averaged over the questions
+    # that actually ran (n_questions - n_errors). Judge cost is eval
+    # overhead, not a property of the pattern, so it's excluded here and
+    # reported separately below.
     usd_per_query: float
+    # generation_usd + judge_usd: what this run cost in total.
     eval_usd: float
     # Count of questions skipped entirely because recipe_fn itself raised
     # (no data at all for that question). Defaults to 0 so existing call
@@ -70,6 +75,11 @@ class PatternResult:
     # must not misreport "no retrieval data" when the retrieval scores were
     # already appended and kept.
     n_accounting_errors: int = 0
+    generation_usd: float = 0.0
+    # Judge calls served from outputs/.judge_cache cost 0 here, so this is
+    # the MARGINAL judge cost given the local cache state, not a
+    # from-scratch total.
+    judge_usd: float = 0.0
 
 
 def load_qa_set(path: str | Path) -> list[dict]:
@@ -161,7 +171,10 @@ def run_pattern(
             # every score already collected for prior questions in this run
             # -- an uncaught exception here would otherwise propagate
             # straight out of run_pattern and discard the whole run, costly
-            # for a real, paid eval run against real APIs. This block covers
+            # for a real, paid eval run against real APIs. A failed question
+            # is scored 0.0 on hit@k/mrr (a crash retrieved nothing, which
+            # must not rank above a pattern that answered wrongly) and
+            # contributes no latency, cost, or judge data. This block covers
             # ONLY recipe_fn itself plus the minimal hit@k/mrr/latency scoring
             # that depends solely on its return value -- cost accounting, filter
             # scoring, and judge calls are each their own try/except below,
@@ -177,7 +190,11 @@ def run_pattern(
                 latencies.append(result.latency_ms)
             except Exception as exc:
                 n_errors += 1
-                print(f"  WARNING: question {qid!r} failed and was skipped (no retrieval data): {exc}", file=sys.stderr)
+                hit3_scores.append(0.0)
+                hit10_scores.append(0.0)
+                mrr_scores.append(0.0)
+                print(f"  WARNING: question {qid!r} recipe_fn failed; scored 0.0 on hit@k/mrr, "
+                      f"no latency/cost/judge data: {exc}", file=sys.stderr)
                 continue
 
             # Cost accounting, filter scoring, AND the trace-file write are
@@ -241,6 +258,7 @@ def run_pattern(
 
     p50, p95 = latency_percentiles(latencies)
     n = len(qa_set)
+    n_scored = n - n_errors
     total_usd = generation_usd_total + judge_usd_total
 
     pattern_result = PatternResult(
@@ -255,11 +273,13 @@ def run_pattern(
         filter_accuracy=bootstrap_ci(filter_scores) if filter_scores else None,
         p50_latency_ms=p50,
         p95_latency_ms=p95,
-        usd_per_query=total_usd / n if n else 0.0,
+        usd_per_query=generation_usd_total / n_scored if n_scored else 0.0,
         eval_usd=total_usd,
         n_errors=n_errors,
         n_judge_errors=n_judge_errors,
         n_accounting_errors=n_accounting_errors,
+        generation_usd=generation_usd_total,
+        judge_usd=judge_usd_total,
     )
 
     if verbose:
@@ -284,11 +304,12 @@ def print_result(result: PatternResult) -> None:
     print(fmt_ci("filter_accuracy", result.filter_accuracy))
     print(f"  p50_latency_ms: {result.p50_latency_ms:.1f}")
     print(f"  p95_latency_ms: {result.p95_latency_ms:.1f}")
-    print(f"  usd_per_query: ${result.usd_per_query:.5f}")
-    print(f"  eval_usd: ${result.eval_usd:.4f}")
+    print(f"  usd_per_query: ${result.usd_per_query:.5f}  (generation only)")
+    print(f"  eval_usd: ${result.eval_usd:.4f}  (generation ${result.generation_usd:.4f} "
+          f"+ judges ${result.judge_usd:.4f})")
     if result.n_errors:
-        print(f"  WARNING: {result.n_errors} question(s) skipped entirely due to a "
-              f"recipe_fn failure (see stderr) -- hit@k/mrr above are computed over "
+        print(f"  WARNING: {result.n_errors} question(s) had recipe_fn fail (see stderr) -- "
+              f"scored 0.0 on hit@k/mrr; latency/cost/judge metrics above are computed over "
               f"{result.n_questions - result.n_errors} of {result.n_questions} questions")
     if result.n_judge_errors:
         print(f"  WARNING: {result.n_judge_errors} question(s) had retrieval succeed but "
