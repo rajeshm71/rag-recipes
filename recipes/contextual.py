@@ -27,7 +27,7 @@ from recipes.embeddings import Embedder
 from recipes.llm import LLM
 
 EMBEDDING_MODEL = "text-embedding-3-small"
-GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"  # final answer, R4 -- unchanged from every other pattern
+GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"  # final answer, held constant across every pattern
 CONTEXTUALIZE_MODEL = "claude-sonnet-5"  # Anthropic, preprocessing step ONLY
 _GENERATION_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "generation_prompt.txt"
 _DOC_PREFIX_PATH = Path(__file__).resolve().parent.parent / "prompts" / "contextualize_document_prefix.txt"

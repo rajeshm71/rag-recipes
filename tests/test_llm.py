@@ -43,10 +43,10 @@ def test_mock_llm_records_cacheable_prefix():
 
 
 def test_mock_llm_simulates_cache_write_then_read():
-    # FIX regression test: without this, MockLLM never populated
-    # cached_input_tokens/cache_creation_input_tokens, so pattern 07's
-    # with-vs-without-caching cost comparison was always identical under
-    # mock. First call with a given cacheable_prefix must be a cache
+    # MockLLM must populate cached_input_tokens/cache_creation_input_tokens
+    # for cacheable_prefix calls, or pattern 07's with-vs-without-caching
+    # cost comparison is always identical under mock. First call with a
+    # given cacheable_prefix must be a cache
     # WRITE (cache_creation_input_tokens > 0, cached_input_tokens == 0);
     # a later call with the SAME prefix must be a cache READ (the
     # opposite).

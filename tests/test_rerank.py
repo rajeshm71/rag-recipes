@@ -32,7 +32,10 @@ def test_make_retrieve_and_answer_end_to_end_with_mock_reranker():
         llm=MockLLM(default_response="answer text"),
         reranker=MockReranker(),
     )
-    result = fn("What speeds up inference?", k=2)
+    # Two chunks share query terms (c1: LLM, inference; c3: model, feedback), so
+    # BM25 yields two candidates for the reranker. A query that lexically
+    # matched only one chunk would correctly return a single id.
+    result = fn("LLM inference model feedback", k=2)
 
     assert result.answer == "answer text"
     assert len(result.retrieved_chunk_ids) == 2

@@ -2,4 +2,4 @@ You are helping search a corpus of ML research papers. Each paper has metadata: 
 
 Question: {question}
 
-Respond with ONLY a JSON object, no other text. Include a key ONLY for a field the question explicitly references; omit fields it doesn't mention. If the question references no metadata field, respond with an empty object: {{}}
+Respond with ONLY a JSON object, no other text. Include a key ONLY for a field the question explicitly references; omit fields it doesn't mention (do not emit null values). "category" is a string and "year" is an integer, e.g. {{"category": "cs.LG", "year": 2024}} or {{"category": "cs.CL"}}. If the question references no metadata field, respond with an empty object: {{}}

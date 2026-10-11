@@ -25,12 +25,39 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"
 _GENERATION_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "generation_prompt.txt"
 SELF_QUERY_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "self_query_prompt.txt"
+# The only metadata fields a filter may constrain. Anything else the LLM
+# emits is dropped rather than compared against a field the corpus doesn't
+# have, which would silently match zero chunks.
+FILTER_FIELDS = ("category", "year")
+# sqlite-vec rejects KNN queries with k above this.
+_MAX_KNN_K = 4096
+
+
+def _coerce_filter_value(field: str, value: object) -> str | int | None:
+    """Normalize one filter value to the type corpus.jsonl stores, or None
+    if it can't be (a null, a list, a non-numeric year...). The comparison
+    in retrieve_and_answer and evals/metrics.py's filter_accuracy are both
+    exact equality, so {"year": "2024"} would otherwise never match an int
+    2024 in the corpus.
+    """
+    if field == "year":
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+        return None
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _parse_filter(text: str) -> dict:
     """Defensive parse, same convention as multi_query.py's
     _parse_subqueries: any failure (bad JSON, non-dict result) degrades to
-    {} (= search the whole corpus), never raises.
+    {} (= search the whole corpus), never raises. Unknown keys, nulls, and
+    uncoercible values are dropped individually, so a plausible-but-wrong
+    shape like {"category": "cs.LG", "year": null} still filters on
+    category instead of matching nothing.
     """
     try:
         stripped = text.strip()
@@ -40,7 +67,14 @@ def _parse_filter(text: str) -> dict:
                 stripped = stripped[4:]
             stripped = stripped.strip()
         parsed = json.loads(stripped)
-        return parsed if isinstance(parsed, dict) else {}
+        if not isinstance(parsed, dict):
+            return {}
+        cleaned: dict = {}
+        for field in FILTER_FIELDS:
+            value = _coerce_filter_value(field, parsed.get(field))
+            if value is not None:
+                cleaned[field] = value
+        return cleaned
     except Exception:
         return {}
 
@@ -69,7 +103,9 @@ def make_retrieve_and_answer(
         # empty filter matches everything). Simple and correct at this
         # corpus scale; a production self-query system would push the
         # filter into the vector DB's WHERE clause instead.
-        ranked_ids = dense_search(store, embedder, embedding_model, question, k=len(all_ids))
+        ranked_ids = dense_search(
+            store, embedder, embedding_model, question, k=min(len(all_ids), _MAX_KNN_K)
+        )
         if extracted_filter:
             ranked_ids = [
                 cid

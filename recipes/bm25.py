@@ -47,13 +47,21 @@ class BM25Index:
         self._bm25 = BM25Okapi(tokenized)
 
     def search(self, query: str, k: int = 5) -> list[BM25Result]:
+        """Top-k chunks by BM25 score, best first. Chunks sharing no term
+        with the query (score 0) are excluded, so a query with zero lexical
+        overlap returns fewer than k results, possibly none. Returning
+        arbitrary zero-score chunks instead would hand them full RRF /
+        reranker credit downstream in the hybrid and rerank patterns.
+        """
         if self._bm25 is None:
             raise RuntimeError("BM25Index.build() must be called before search()")
         scores = self._bm25.get_scores(_tokenize(query))
         ranked = sorted(
-            zip(self._chunk_ids, scores), key=lambda pair: pair[1], reverse=True
+            ((cid, float(s)) for cid, s in zip(self._chunk_ids, scores) if s > 0),
+            key=lambda pair: pair[1],
+            reverse=True,
         )
-        return [BM25Result(chunk_id=cid, score=float(s)) for cid, s in ranked[:k]]
+        return [BM25Result(chunk_id=cid, score=s) for cid, s in ranked[:k]]
 
 
 GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"

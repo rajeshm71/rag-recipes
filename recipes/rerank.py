@@ -19,6 +19,9 @@ from recipes.bm25 import BM25Index
 from recipes.llm import LLM
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+# Query + one 512-token chunk fits comfortably; the model's own 8k limit
+# would make every pair an order of magnitude slower for no gain.
+RERANKER_MAX_LENGTH = 768
 GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"
 CANDIDATES_K = 20
 _GENERATION_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "generation_prompt.txt"
@@ -41,10 +44,10 @@ class CrossEncoderReranker:
     only test runs never need it importable (same convention as OpenAILLM).
     """
 
-    def __init__(self, model_name: str = RERANKER_MODEL) -> None:
+    def __init__(self, model_name: str = RERANKER_MODEL, max_length: int = RERANKER_MAX_LENGTH) -> None:
         from sentence_transformers import CrossEncoder
 
-        self._model = CrossEncoder(model_name)
+        self._model = CrossEncoder(model_name, max_length=max_length)
 
     def rerank(
         self, query: str, candidates: list[tuple[str, str]], top_k: int

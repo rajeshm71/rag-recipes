@@ -35,6 +35,20 @@ def test_parse_subqueries_missing_key_falls_back():
     assert _parse_subqueries('{"other": "field"}', fallback_question="q") == ["q"]
 
 
+def test_parse_subqueries_drops_blank_and_non_string_entries():
+    text = '{"queries": ["", "  ", 42, null, " real query "]}'
+    assert _parse_subqueries(text, fallback_question="q") == ["real query"]
+
+
+def test_parse_subqueries_all_blank_falls_back():
+    assert _parse_subqueries('{"queries": ["", null]}', fallback_question="q") == ["q"]
+
+
+def test_parse_subqueries_caps_at_three():
+    text = '{"queries": ["a", "b", "c", "d", "e"]}'
+    assert _parse_subqueries(text, fallback_question="q") == ["a", "b", "c"]
+
+
 def test_llm_called_twice_and_dense_search_runs_per_subquery():
     llm = MockLLM(
         canned={DECOMPOSE_MARKER: '{"queries": ["query one", "query two"]}'},

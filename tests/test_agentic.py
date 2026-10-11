@@ -10,7 +10,7 @@ FIXTURE_CORPUS = {
 
 # Unique substring that only appears in agentic_prompt.txt, never in
 # generation_prompt.txt -- distinguishes agent-decision calls from the
-# final R4-templated generation call.
+# final held-constant generation call.
 AGENT_MARKER = "retrieval agent searching a corpus"
 
 

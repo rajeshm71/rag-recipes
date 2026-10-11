@@ -34,6 +34,23 @@ def test_parse_filter_empty_object():
     assert _parse_filter("{}") == {}
 
 
+def test_parse_filter_drops_null_values_instead_of_matching_nothing():
+    # {"year": null} compared against an int year would exclude every chunk.
+    assert _parse_filter('{"category": "cs.LG", "year": null}') == {"category": "cs.LG"}
+
+
+def test_parse_filter_drops_unknown_keys():
+    assert _parse_filter('{"category": "cs.LG", "author": "Doe"}') == {"category": "cs.LG"}
+
+
+def test_parse_filter_coerces_year_string_to_int():
+    assert _parse_filter('{"year": "2024"}') == {"year": 2024}
+
+
+def test_parse_filter_drops_uncoercible_values():
+    assert _parse_filter('{"category": ["cs.LG"], "year": "twenty twenty-four"}') == {}
+
+
 def test_extracted_filter_is_populated_on_result():
     llm = MockLLM(
         canned={FILTER_MARKER: '{"category": "cs.LG"}'}, default_response="final answer"

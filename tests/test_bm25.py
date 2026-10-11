@@ -26,6 +26,12 @@ def test_bm25_respects_k():
     assert len(results) == 2
 
 
+def test_bm25_zero_overlap_returns_no_results():
+    index = BM25Index()
+    index.build(chunk_ids=["a", "b"], texts=["cat dog", "bird fish"])
+    assert index.search("zebra", k=2) == []
+
+
 def test_bm25_raises_before_build():
     index = BM25Index()
     try:

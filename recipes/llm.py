@@ -162,12 +162,10 @@ class MockLLM:
         # sane to work with in tests without needing a real tokenizer.
         output_tokens = max(1, len(text) // 4)
 
-        # FIX: without this, MockLLM never populated cached_input_tokens/
-        # cache_creation_input_tokens, so pattern 07's with-vs-without-
-        # caching cost comparison was always identical under mock (found
-        # while executing 07_contextual.ipynb -- $0.00 savings every time,
-        # even though the formula itself was correct). Simulate real cache
-        # semantics deterministically instead: the FIRST time a given
+        # Simulate real prompt-cache semantics deterministically, so that
+        # pattern 07's with-vs-without-caching cost comparison shows a
+        # nonzero difference under mock instead of $0.00 savings every
+        # time: the FIRST time a given
         # cacheable_prefix is seen on this instance, its tokens are billed
         # as a cache write; every subsequent call with the SAME prefix
         # bills them as a cache read. This only activates when a caller
@@ -270,8 +268,8 @@ def get_llm() -> LLM:
 
 def get_anthropic_llm() -> LLM:
     """Factory for pattern 07's Anthropic step, respecting RAG_RECIPES_LLM
-    the same way get_llm() does -- R8 (CI is mock-only) applies to every
-    provider, not just OpenAI.
+    the same way get_llm() does -- CI is mock-only for every provider, not
+    just OpenAI.
     """
     backend = os.environ.get("RAG_RECIPES_LLM", "openai").lower()
     if backend == "mock":

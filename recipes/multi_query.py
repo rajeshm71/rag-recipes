@@ -2,11 +2,11 @@
 sub-queries, retrieve for each independently, merge by best rank. Helps
 ambiguous queries; roughly doubles retrieval + one extra LLM call's cost.
 
-NOTE on R4 scope: `prompts/generation_prompt.txt` (R4, held constant) is
-used ONLY for this pattern's final answer-generation call. The decomposition
+Scope of the held-constant prompt: `prompts/generation_prompt.txt` is used
+ONLY for this pattern's final answer-generation call. The decomposition
 prompt (`prompts/multi_query_prompt.txt`) is an auxiliary, pattern-specific
 prompt that runs BEFORE retrieval -- it is an input to what gets retrieved,
-not "the generation step," so R4 does not apply to it.
+not "the generation step," so the held-constant rule does not apply to it.
 """
 
 from __future__ import annotations
@@ -26,13 +26,18 @@ GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"
 _GENERATION_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "generation_prompt.txt"
 MULTI_QUERY_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "multi_query_prompt.txt"
 PER_SUBQUERY_K = 10
+# The prompt asks for "up to 3"; enforce it here too so a chatty response
+# can't turn into 20 embedding calls.
+MAX_SUBQUERIES = 3
 
 
 def _parse_subqueries(text: str, fallback_question: str) -> list[str]:
     """Defensive parse: any failure (bad JSON, missing/empty 'queries')
     degrades gracefully to [fallback_question] rather than raising. The key
     claim of this pattern is "helps ambiguous queries," not "may crash on
-    bad JSON."
+    bad JSON." Blank or non-string entries are dropped (an empty string
+    would reach the embedder and be rejected by the API) and the list is
+    capped at MAX_SUBQUERIES.
     """
     try:
         stripped = text.strip()
@@ -43,9 +48,12 @@ def _parse_subqueries(text: str, fallback_question: str) -> list[str]:
             stripped = stripped.strip()
         parsed = json.loads(stripped)
         queries = parsed.get("queries")
-        if not queries or not isinstance(queries, list):
-            raise ValueError("empty or missing 'queries'")
-        return [str(q) for q in queries]
+        if not isinstance(queries, list):
+            raise TypeError("missing 'queries'")
+        cleaned = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+        if not cleaned:
+            raise ValueError("no usable queries")
+        return cleaned[:MAX_SUBQUERIES]
     except Exception:
         return [fallback_question]
 

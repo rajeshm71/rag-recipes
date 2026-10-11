@@ -186,8 +186,8 @@ def get_embedder() -> Embedder:
 
 def get_voyage_embedder() -> Embedder:
     """Factory for A2's Voyage leg, respecting RAG_RECIPES_LLM the same way
-    get_embedder()/get_anthropic_llm() do -- R8 (CI is mock-only) applies
-    to every provider, not just OpenAI.
+    get_embedder()/get_anthropic_llm() do -- CI is mock-only for every
+    provider, not just OpenAI.
     """
     backend = os.environ.get("RAG_RECIPES_LLM", "openai").lower()
     if backend == "mock":

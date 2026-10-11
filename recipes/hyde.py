@@ -4,11 +4,11 @@ question, then generate the real answer from what's retrieved. Two LLM
 calls per query -- token accounting sums both, or cost is silently
 understated.
 
-NOTE on R4 scope: `prompts/generation_prompt.txt` (R4, held constant) is
-used ONLY for this pattern's final answer-generation call. The hypothetical-
+Scope of the held-constant prompt: `prompts/generation_prompt.txt` is used
+ONLY for this pattern's final answer-generation call. The hypothetical-
 document prompt (`prompts/hyde_prompt.txt`) is an auxiliary, pattern-specific
 prompt that runs BEFORE retrieval -- it is an input to what gets retrieved,
-not "the generation step," so R4 does not apply to it.
+not "the generation step," so the held-constant rule does not apply to it.
 """
 
 from __future__ import annotations

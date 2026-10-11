@@ -23,7 +23,7 @@ def test_bm25_pattern_ranks_exact_keyword_match_first():
 
 def test_bm25_pattern_returns_bound_closure_shape():
     fn = make_retrieve_and_answer(FIXTURE_CORPUS, llm=MockLLM())
-    result = fn("any question", k=1)
+    result = fn("decoding inference", k=1)
 
     assert len(result.retrieved_chunk_ids) == 1
     assert result.input_tokens > 0
@@ -39,11 +39,11 @@ def test_bm25_pattern_context_reaches_llm():
     assert "Speculative decoding" in llm.calls[0].prompt
 
 
-def test_bm25_pattern_no_shared_keywords_still_returns_results():
-    # No API-free retrieval failure mode: a query with zero shared tokens
-    # still returns the corpus's lowest-scoring chunks rather than erroring,
-    # which is exactly the kind of case the notebook's failure-mode section
-    # will cite for real.
+def test_bm25_pattern_no_shared_keywords_returns_empty_not_arbitrary():
+    # A query with zero shared tokens is BM25's defining failure mode: it
+    # must surface as an empty retrieval (and an empty context for the
+    # generator), not as k arbitrary chunks that happen to sort first.
     fn = make_retrieve_and_answer(FIXTURE_CORPUS, llm=MockLLM())
     result = fn("zzz nonexistent term qqq", k=3)
-    assert len(result.retrieved_chunk_ids) == 3
+    assert result.retrieved_chunk_ids == []
+    assert result.answer  # generation still runs, just with no context

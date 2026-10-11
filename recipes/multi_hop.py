@@ -3,7 +3,14 @@ fires several sub-queries in PARALLEL from one upfront decomposition), this
 pattern is SEQUENTIAL: after each search, an LLM call decides whether
 another, different search is needed before enough context exists to answer
 -- each hop's query depends on what the PREVIOUS hop found. Bounded to
-MAX_HOPS to keep cost predictable (roughly hops+1 LLM calls per question).
+MAX_HOPS to keep cost predictable: one decision call after every hop except
+the last, plus one final generation call, so at most MAX_HOPS LLM calls per
+question.
+
+Final ranking: each hop's ranked results are fused with reciprocal rank
+fusion (recipes/hybrid.py's rrf_fuse) before slicing to k. Returning them in
+discovery order instead would let hop 1 fill ranks 1-5 regardless of what
+later hops found, making hit@3/MRR indistinguishable from naive dense.
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ from pathlib import Path
 from recipes import AnswerWithCitations
 from recipes.dense_index import build_dense_index, dense_search
 from recipes.embeddings import Embedder
+from recipes.hybrid import rrf_fuse
 from recipes.llm import LLM
 
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -60,12 +68,15 @@ def make_retrieve_and_answer(
 
     def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations:
         start = time.perf_counter()
-        accumulated_ids: list[str] = []
+        hop_results: list[list[str]] = []  # one ranked id list per hop
+        accumulated_ids: list[str] = []  # dedup'd union, for the hop prompt's context
         total_input = total_output = total_cached = total_cache_creation = 0
         current_query = question
 
         for hop in range(max_hops):
-            for cid in dense_search(store, embedder, embedding_model, current_query, per_hop_k):
+            ids = dense_search(store, embedder, embedding_model, current_query, per_hop_k)
+            hop_results.append(ids)
+            for cid in ids:
                 if cid not in accumulated_ids:
                     accumulated_ids.append(cid)
 
@@ -87,7 +98,7 @@ def make_retrieve_and_answer(
                 break
             current_query = next_query
 
-        retrieved_ids = accumulated_ids[:k]
+        retrieved_ids = rrf_fuse(hop_results, k)
         context = "\n\n".join(
             f"[{cid}] {corpus_by_id[cid]['text']}" for cid in retrieved_ids if cid in corpus_by_id
         )

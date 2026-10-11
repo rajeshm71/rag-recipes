@@ -16,6 +16,12 @@ done here (this function stays pure/side-effect-free, consistent with
 every other recipe module -- and with keeping any on-disk state fully
 test-isolated); it's done by evals/run.py's trace_output_path param, which
 the 10_agentic.ipynb notebook passes in.
+
+Final ranking: the chunks gathered across every search are fused with
+reciprocal rank fusion (recipes/hybrid.py's rrf_fuse) before slicing to k.
+Returning them in discovery order instead would let the FIRST search fill
+ranks 1-5 regardless of what later searches found, making hit@3/MRR
+indistinguishable from a single dense search.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from recipes import AnswerWithCitations
 from recipes.bm25 import BM25Index
 from recipes.dense_index import build_dense_index, dense_search
 from recipes.embeddings import Embedder
+from recipes.hybrid import rrf_fuse
 from recipes.llm import LLM
 
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -59,13 +66,28 @@ def _parse_agent_action(text: str) -> dict:
         action = parsed.get("action")
         if action not in _VALID_ACTIONS:
             return fallback
-        return {
-            "thought": str(parsed.get("thought", "")),
-            "action": action,
-            "action_input": str(parsed.get("action_input", "")),
-        }
+        thought = str(parsed.get("thought", ""))
+        action_input = str(parsed.get("action_input") or "").strip()
+        if action != "finish" and not action_input:
+            # A search with an empty query would reach the embedder as ""
+            # (which OpenAI's embeddings endpoint rejects) and throw the
+            # whole question out; treat it as "nothing left to search for".
+            return {"thought": thought, "action": "finish", "action_input": ""}
+        return {"thought": thought, "action": action, "action_input": action_input}
     except Exception:
         return fallback
+
+
+def _render_observation(ids: list[str], corpus_by_id: dict[str, dict]) -> str:
+    """What the agent sees after a search. It must include the chunk TEXT:
+    an observation of bare chunk ids gives the next decision call nothing
+    to reason about, so "have I gathered enough context?" would be answered
+    blind.
+    """
+    if not ids:
+        return "Retrieved 0 chunks."
+    rendered = "\n".join(f"[{cid}] {corpus_by_id[cid]['text']}" for cid in ids if cid in corpus_by_id)
+    return f"Retrieved {len(ids)} chunks:\n{rendered}"
 
 
 def _render_transcript(transcript: list[dict]) -> str:
@@ -99,7 +121,7 @@ def make_retrieve_and_answer(
     def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations:
         start = time.perf_counter()
         transcript: list[dict] = []
-        accumulated_ids: list[str] = []
+        ranked_lists: list[list[str]] = []  # one ranked id list per search call
         total_input = total_output = total_cached = total_cache_creation = 0
 
         for _ in range(max_iterations):
@@ -119,12 +141,10 @@ def make_retrieve_and_answer(
                 ids = dense_search(store, embedder, embedding_model, step["action_input"], tool_k)
             else:  # search_bm25
                 ids = [r.chunk_id for r in bm25_index.search(step["action_input"], tool_k)]
-            for cid in ids:
-                if cid not in accumulated_ids:
-                    accumulated_ids.append(cid)
-            transcript.append({**step, "observation": f"Retrieved: {ids}"})
+            ranked_lists.append(ids)
+            transcript.append({**step, "observation": _render_observation(ids, corpus_by_id)})
 
-        retrieved_ids = accumulated_ids[:k]
+        retrieved_ids = rrf_fuse(ranked_lists, k)
         context = "\n\n".join(
             f"[{cid}] {corpus_by_id[cid]['text']}" for cid in retrieved_ids if cid in corpus_by_id
         )

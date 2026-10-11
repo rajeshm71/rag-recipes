@@ -1,12 +1,17 @@
 """Shared contract every pattern recipe (recipes/<pattern>.py) implements.
 
-Each pattern module exposes:
+Each pattern module exposes a factory:
+
+    def make_retrieve_and_answer(corpus_by_id, llm, ...) -> Callable
+
+which builds its index once and returns the bound closure
 
     def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations
 
+that evals/run.py's run_pattern() and every notebook call per question.
 This lives in recipes/__init__.py rather than a pattern-specific file
-because it's the interface the eval harness (evals/run.py) and every
-pattern module both depend on.
+because it's the interface the eval harness and every pattern module both
+depend on.
 """
 
 from __future__ import annotations
@@ -17,6 +22,9 @@ from dataclasses import dataclass, field
 @dataclass
 class AnswerWithCitations:
     answer: str
+    # Rank-ordered, best first, no duplicates: hit@k slices the top k and
+    # MRR uses the position of the first relevant id, so a pattern that
+    # returns an unordered set here is scored on an arbitrary order.
     retrieved_chunk_ids: list[str]
     latency_ms: float
     input_tokens: int
