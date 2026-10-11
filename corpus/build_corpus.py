@@ -51,9 +51,12 @@ def _get_tokenizer():
     try:
         return tiktoken.encoding_for_model("gpt-4.1-mini")
     except KeyError:
-        # gpt-4.1-mini may not be recognized by an older installed tiktoken;
-        # cl100k_base is the encoding family GPT-4-class chat models use.
-        return tiktoken.get_encoding("cl100k_base")
+        # gpt-4.1-mini may not be recognized by an older installed tiktoken.
+        # It resolves to o200k_base on versions that know it, and the
+        # committed corpus.jsonl's n_tokens were counted with o200k_base, so
+        # fall back to that same encoding (cl100k_base would count ~1-5%
+        # differently and move chunk boundaries).
+        return tiktoken.get_encoding("o200k_base")
 
 
 def search_arxiv(
@@ -292,9 +295,9 @@ def build_corpus(
             collected_for_category += 1
             time.sleep(1)  # be polite to arXiv's servers
 
-    # FIX (plan deviation, review): --dry-run proves the pipeline is
-    # reproducible against live arXiv data (fetch, extract, chunk) without
-    # overwriting the committed corpus.jsonl that actually ships.
+    # --dry-run proves the pipeline is reproducible against live arXiv data
+    # (fetch, extract, chunk) without overwriting the committed corpus.jsonl
+    # that actually ships.
     if dry_run:
         print()
         print(f"[dry run] Would write {len(all_chunks)} chunks from "
