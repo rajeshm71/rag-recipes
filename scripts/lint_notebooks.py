@@ -29,6 +29,8 @@ REQUIRED_SECTIONS = [
 ]
 
 HEADER_RE = re.compile(r"^##\s+(\d+)\.\s+(.+)$", re.MULTILINE)
+# Placeholder markers that must never ship in a pattern notebook's text.
+PLACEHOLDER_RE = re.compile(r"\bPENDING\b|\bTODO\b|\[FILL IN", re.IGNORECASE)
 
 
 def find_pattern_notebooks(notebooks_dir: Path = NOTEBOOKS_DIR) -> list[Path]:
@@ -47,10 +49,22 @@ def extract_headers(notebook_path: Path) -> list[tuple[int, str]]:
     return headers
 
 
+def find_placeholders(notebook_path: Path) -> list[str]:
+    nb = json.loads(notebook_path.read_text(encoding="utf-8"))
+    hits = []
+    for i, cell in enumerate(nb["cells"]):
+        if cell["cell_type"] != "markdown":
+            continue
+        match = PLACEHOLDER_RE.search("".join(cell["source"]))
+        if match:
+            hits.append(f"cell {i} contains placeholder text {match.group(0)!r}")
+    return hits
+
+
 def lint_notebook(notebook_path: Path) -> list[str]:
     """Returns a list of human-readable problems; empty means it passes."""
     headers = extract_headers(notebook_path)
-    problems = []
+    problems = find_placeholders(notebook_path)
     numbers_seen = [n for n, _ in headers]
 
     if numbers_seen != sorted(numbers_seen):

@@ -114,3 +114,14 @@ def test_real_pattern_notebooks_all_pass():
     for path in notebooks:
         problems = lint_notebook(path)
         assert problems == [], f"{path.name}: {problems}"
+
+
+def test_lint_rejects_placeholder_text(tmp_path):
+    path = _write_fixture_notebook(tmp_path, "05_x.ipynb", GOOD_SECTIONS)
+    nb = json.loads(path.read_text(encoding="utf-8"))
+    nb["cells"][6]["source"] = ["## 7. Where this pattern FAILS\n", "PENDING: to be written.\n"]
+    path.write_text(json.dumps(nb), encoding="utf-8")
+
+    problems = lint_notebook(path)
+
+    assert any("placeholder" in p and "PENDING" in p for p in problems)
