@@ -61,9 +61,49 @@ class Row:
     per_question: list[dict]
 
 
+class PairScoreCache:
+    """Cross-encoder scores keyed by (question, chunk_id). Both rerank rows
+    score mostly the same candidates and the cross-encoder dominates the
+    script's runtime, so each pair is scored once. Each pair also keeps the
+    time it took to score (its batch's time split evenly), and a reused
+    pair charges that time to the caller through `take_reused_ms()`, so a
+    row's latency still reflects scoring all of its candidates."""
+
+    def __init__(self, reranker: Reranker, corpus_by_id: dict[str, dict]) -> None:
+        self._reranker = reranker
+        self._corpus_by_id = corpus_by_id
+        self._scores: dict[tuple[str, str], float] = {}
+        self._ms: dict[tuple[str, str], float] = {}
+        self._reused_ms = 0.0
+
+    def rerank(self, q: str, candidates: list[str], k: int) -> list[str]:
+        missing = [cid for cid in candidates if (q, cid) not in self._scores]
+        self._reused_ms += sum(self._ms[(q, cid)] for cid in candidates if (q, cid) in self._scores)
+        if missing:
+            pairs = [(cid, self._corpus_by_id[cid]["text"]) for cid in missing]
+            start = time.perf_counter()
+            results = self._reranker.rerank(q, pairs, top_k=len(pairs))
+            per_pair_ms = (time.perf_counter() - start) * 1000 / len(pairs)
+            for r in results:
+                self._scores[(q, r.chunk_id)] = r.score
+                self._ms[(q, r.chunk_id)] = per_pair_ms
+        # Stable sort: ties keep candidate order, as Reranker.rerank does.
+        return sorted(candidates, key=lambda cid: self._scores[(q, cid)], reverse=True)[:k]
+
+    def take_reused_ms(self) -> float:
+        """Scoring time of the pairs reused since the last call."""
+        reused, self._reused_ms = self._reused_ms, 0.0
+        return reused
+
+
 def build_retrievers(
-    corpus_by_id: dict[str, dict], embedder: Embedder, reranker: Reranker, embedding_model: str
+    corpus_by_id: dict[str, dict],
+    embedder: Embedder,
+    reranker: Reranker,
+    embedding_model: str,
+    pair_cache: PairScoreCache | None = None,
 ) -> dict[str, Retriever]:
+    pair_cache = pair_cache or PairScoreCache(reranker, corpus_by_id)
     chunk_ids = list(corpus_by_id.keys())
     store = build_dense_index(corpus_by_id, embedder, embedding_model)
     bm25 = BM25Index()
@@ -78,15 +118,11 @@ def build_retrievers(
     def hybrid(q: str, k: int) -> list[str]:
         return rrf_fuse([dense(q, CANDIDATES), bm25_only(q, CANDIDATES)], k)
 
-    def rerank(candidates: list[str], q: str, k: int) -> list[str]:
-        pairs = [(cid, corpus_by_id[cid]["text"]) for cid in candidates]
-        return [r.chunk_id for r in reranker.rerank(q, pairs, top_k=k)]
-
     def bm25_rerank(q: str, k: int) -> list[str]:
-        return rerank(bm25_only(q, CANDIDATES), q, k)
+        return pair_cache.rerank(q, bm25_only(q, CANDIDATES), k)
 
     def hybrid_rerank(q: str, k: int) -> list[str]:
-        return rerank(hybrid(q, CANDIDATES), q, k)
+        return pair_cache.rerank(q, hybrid(q, CANDIDATES), k)
 
     return {
         "01_naive_dense": dense,
@@ -97,14 +133,22 @@ def build_retrievers(
     }
 
 
-def score(name: str, retrieve: Retriever, qa_set: list[dict], k: int = 10) -> Row:
+def score(
+    name: str,
+    retrieve: Retriever,
+    qa_set: list[dict],
+    k: int = 10,
+    extra_latency_ms: Callable[[], float] | None = None,
+) -> Row:
+    """`extra_latency_ms`, if given, is called after each retrieval and its
+    result added to that question's latency (cached work charged back)."""
     h3, h10, rr, rec, lat = [], [], [], [], []
     per_question = []
     for record in qa_set:
         relevant = record["relevant_chunk_ids"]
         start = time.perf_counter()
         ids = retrieve(record["question"], k)
-        lat.append((time.perf_counter() - start) * 1000)
+        lat.append((time.perf_counter() - start) * 1000 + (extra_latency_ms() if extra_latency_ms else 0.0))
         h3.append(hit_at_k(ids, relevant, 3))
         h10.append(hit_at_k(ids, relevant, 10))
         rr.append(mrr(ids, relevant))
@@ -210,8 +254,11 @@ def run(
 
     corpus_by_id = load_corpus_by_id(corpus_path)
     qa_set = load_qa_set(qa_path)
-    retrievers = build_retrievers(corpus_by_id, embedder, reranker, embedding_model)
-    rows = [score(name, fn, qa_set) for name, fn in retrievers.items()]
+    pair_cache = PairScoreCache(reranker, corpus_by_id)
+    retrievers = build_retrievers(corpus_by_id, embedder, reranker, embedding_model, pair_cache)
+    rows = [
+        score(name, fn, qa_set, extra_latency_ms=pair_cache.take_reused_ms) for name, fn in retrievers.items()
+    ]
     return render(rows, len(qa_set), len(corpus_by_id), embedding_model, reranker_model), rows
 
 

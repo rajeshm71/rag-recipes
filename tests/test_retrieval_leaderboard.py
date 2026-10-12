@@ -3,6 +3,7 @@ mock embedder and reranker: every row is produced, the table renders, and
 --check's comparison ignores the latency column."""
 
 import json
+import time
 
 from evals.retrieval_leaderboard import (
     README_END,
@@ -84,3 +85,50 @@ def test_run_on_files(tmp_path):
     assert len(rows) == 5
     assert md.startswith("# Retrieval leaderboard")
     assert "2 questions, 4 chunks" in md
+
+
+class _CountingReranker(MockReranker):
+    def __init__(self):
+        self.scored_pairs: list[tuple[str, str]] = []
+
+    def rerank(self, query, candidates, top_k):
+        self.scored_pairs += [(query, cid) for cid, _ in candidates]
+        return super().rerank(query, candidates, top_k)
+
+
+def test_rerank_rows_score_each_pair_once_and_keep_the_reranker_order():
+    counting = _CountingReranker()
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), counting, "mock")
+    question = QA[1]["question"]
+    candidates = retrievers["03_hybrid_rrf"](question, 20)
+    pairs = [(cid, CORPUS[cid]["text"]) for cid in candidates]
+    expected = [r.chunk_id for r in MockReranker().rerank(question, pairs, top_k=3)]
+
+    retrievers["04_bm25_rerank"](question, 3)
+    assert retrievers["03+04_hybrid_rerank"](question, 3) == expected
+    retrievers["03+04_hybrid_rerank"](question, 3)
+
+    assert len(counting.scored_pairs) == len(set(counting.scored_pairs)) == len(candidates)
+
+
+class _SlowReranker(MockReranker):
+    SECONDS_PER_PAIR = 0.02
+
+    def rerank(self, query, candidates, top_k):
+        time.sleep(self.SECONDS_PER_PAIR * len(candidates))
+        return super().rerank(query, candidates, top_k)
+
+
+def test_reused_pairs_are_charged_to_the_rows_latency(tmp_path):
+    # Hybrid offers every chunk as a candidate (4 per question); some of
+    # those pairs were already scored by the BM25 + rerank row. The hybrid
+    # row must still be charged for scoring all 4, not just the new ones.
+    corpus_path = tmp_path / "corpus.jsonl"
+    qa_path = tmp_path / "qa.jsonl"
+    corpus_path.write_text("\n".join(json.dumps(c) for c in CORPUS.values()) + "\n", encoding="utf-8")
+    qa_path.write_text("\n".join(json.dumps(q) for q in QA) + "\n", encoding="utf-8")
+
+    _, rows = run(corpus_path, qa_path, embedder=MockEmbedder(), reranker=_SlowReranker())
+
+    hybrid_rerank = next(r for r in rows if r.name == "03+04_hybrid_rerank")
+    assert hybrid_rerank.p50_latency_ms >= len(CORPUS) * _SlowReranker.SECONDS_PER_PAIR * 1000
