@@ -1,6 +1,8 @@
+import pytest
+
 from recipes.contextual import _contextualize_corpus, make_retrieve_and_answer
 from recipes.embeddings import MockEmbedder
-from recipes.llm import MockLLM
+from recipes.llm import MockLLM, UnusableResponseError
 
 FIXTURE_CORPUS = {
     "p1#0": {"chunk_id": "p1#0", "paper_id": "p1", "text": "Paper one, chunk zero: speculative decoding."},
@@ -84,3 +86,35 @@ def test_final_generation_context_uses_original_text_not_blurbed_text():
     final_prompt = gen_llm.calls[0].prompt
     assert "DISTINCTIVE_BLURB_MARKER" not in final_prompt
     assert any(chunk["text"] in final_prompt for chunk in FIXTURE_CORPUS.values())
+
+
+class _RefusesOneChunk(MockLLM):
+    """Returns a blurb for every chunk except the one whose text contains
+    `refused_text`, which comes back unusable (but still billed)."""
+
+    def __init__(self, refused_text):
+        super().__init__(default_response="BLURB")
+        self.refused_text = refused_text
+
+    def complete(self, prompt, model, temperature=0.0, max_tokens=1024, cacheable_prefix=None):
+        response = super().complete(prompt, model, temperature, max_tokens, cacheable_prefix)
+        if self.refused_text in prompt:
+            raise UnusableResponseError("no usable text (stop_reason='refusal')", response)
+        return response
+
+
+def test_unusable_response_keeps_original_text_and_is_still_counted():
+    llm = _RefusesOneChunk(refused_text="draft model verification")
+    cost_log: list[dict] = []
+
+    with pytest.warns(UserWarning, match="1 of 3 chunks kept their original text"):
+        result = _contextualize_corpus(FIXTURE_CORPUS, llm, model="claude-sonnet-5", cost_log=cost_log)
+
+    assert result["p1#1"]["text"] == FIXTURE_CORPUS["p1#1"]["text"]
+    assert result["p1#0"]["text"].startswith("BLURB\n\n")
+    assert result["p2#0"]["text"].startswith("BLURB\n\n")
+    by_id = {e["chunk_id"]: e for e in cost_log}
+    assert len(by_id) == 3
+    assert by_id["p1#1"]["contextualized"] is False
+    assert by_id["p1#1"]["input_tokens"] > 0
+    assert by_id["p1#0"]["contextualized"] is True

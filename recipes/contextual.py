@@ -18,13 +18,14 @@ entirely in what gets embedded, not in the retrieval or generation mechanism.
 from __future__ import annotations
 
 import time
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 
 from recipes import AnswerWithCitations
 from recipes.dense_index import build_dense_index, dense_search
 from recipes.embeddings import Embedder
-from recipes.llm import LLM
+from recipes.llm import LLM, UnusableResponseError
 
 EMBEDDING_MODEL = "text-embedding-3-small"
 GENERATION_MODEL = "gpt-4.1-mini-2025-04-14"  # final answer, held constant across every pattern
@@ -47,7 +48,9 @@ def _contextualize_corpus(
 
     If `cost_log` is a list, one dict is appended per LLM call with its
     real token breakdown, so the caller (the 07 notebook) can compute a
-    with/without-caching cost comparison afterward.
+    with/without-caching cost comparison afterward. A chunk whose call
+    returns no usable text (refused or cut off) keeps its original text, is
+    logged with "contextualized": False, and is named in one warning.
     """
     doc_prefix_template = _DOC_PREFIX_PATH.read_text(encoding="utf-8")
     chunk_prompt_template = _CHUNK_PROMPT_PATH.read_text(encoding="utf-8")
@@ -57,6 +60,7 @@ def _contextualize_corpus(
         by_paper.setdefault(chunk["paper_id"], []).append(cid)
 
     contextualized: dict[str, dict] = {}
+    skipped: list[str] = []
     for paper_id, chunk_ids in by_paper.items():
         document_text = "\n\n".join(corpus_by_id[cid]["text"] for cid in chunk_ids)
         cacheable_prefix = doc_prefix_template.format(document_text=document_text)
@@ -64,9 +68,18 @@ def _contextualize_corpus(
         for cid in chunk_ids:
             chunk = corpus_by_id[cid]
             prompt = chunk_prompt_template.format(chunk_text=chunk["text"])
-            response = anthropic_llm.complete(
-                prompt=prompt, model=model, temperature=0.0, cacheable_prefix=cacheable_prefix
-            )
+            try:
+                response = anthropic_llm.complete(
+                    prompt=prompt, model=model, temperature=0.0, cacheable_prefix=cacheable_prefix
+                )
+                usable = True
+            except UnusableResponseError as exc:
+                # One refused or truncated blurb should not throw away every
+                # other (already billed) call: this chunk keeps its original
+                # text and the call is still counted.
+                response = exc.response
+                usable = False
+                skipped.append(cid)
             if cost_log is not None:
                 cost_log.append(
                     {
@@ -76,10 +89,18 @@ def _contextualize_corpus(
                         "cached_input_tokens": response.cached_input_tokens,
                         "cache_creation_input_tokens": response.cache_creation_input_tokens,
                         "output_tokens": response.output_tokens,
+                        "contextualized": usable,
                     }
                 )
-            contextualized[cid] = {**chunk, "text": f"{response.text.strip()}\n\n{chunk['text']}"}
+            text = f"{response.text.strip()}\n\n{chunk['text']}" if usable else chunk["text"]
+            contextualized[cid] = {**chunk, "text": text}
 
+    if skipped:
+        warnings.warn(
+            f"{len(skipped)} of {len(corpus_by_id)} chunks kept their original text because the "
+            f"contextualization call returned no usable text: {', '.join(skipped)}",
+            stacklevel=2,
+        )
     return contextualized
 
 

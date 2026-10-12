@@ -32,6 +32,16 @@ class LLMResponse:
     latency_ms: float = 0.0
 
 
+class UnusableResponseError(RuntimeError):
+    """The provider answered but returned no usable text (a refusal, a
+    response cut off at max_tokens, or an empty one). The call was still
+    billed, so its token counts travel with the error in `response`."""
+
+    def __init__(self, message: str, response: LLMResponse) -> None:
+        super().__init__(message)
+        self.response = response
+
+
 class LLM(Protocol):
     def complete(
         self,
@@ -220,10 +230,15 @@ class AnthropicLLM:
         cacheable_prefix: str | None = None,
     ) -> LLMResponse:
         start = time.perf_counter()
+        # `temperature` is accepted for interface parity but not sent:
+        # claude-sonnet-5 rejects every sampling parameter with a 400.
+        # Thinking is on by default for that model and its tokens count
+        # against max_tokens, so it is turned off explicitly: the
+        # contextualization prompt is a short summary, not a reasoning task.
         kwargs = {
             "model": model,
             "max_tokens": max_tokens,
-            "temperature": temperature,
+            "thinking": {"type": "disabled"},
             "messages": [{"role": "user", "content": prompt}],
         }
         if cacheable_prefix:
@@ -247,7 +262,7 @@ class AnthropicLLM:
         total_input = usage.input_tokens + cache_read + cache_creation
         text = "".join(block.text for block in response.content if block.type == "text")
 
-        return LLMResponse(
+        result = LLMResponse(
             text=text,
             input_tokens=total_input,
             output_tokens=usage.output_tokens,
@@ -255,6 +270,13 @@ class AnthropicLLM:
             cache_creation_input_tokens=cache_creation,
             latency_ms=latency_ms,
         )
+        # A refused or truncated response would otherwise be stored as a
+        # blank or partial context blurb with no error anywhere.
+        if response.stop_reason in ("refusal", "max_tokens") or not text.strip():
+            raise UnusableResponseError(
+                f"Anthropic call returned no usable text (stop_reason={response.stop_reason!r})", result
+            )
+        return result
 
 
 def get_llm() -> LLM:

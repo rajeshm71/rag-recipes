@@ -1,4 +1,6 @@
-from recipes.llm import AnthropicLLM, MockLLM, get_anthropic_llm
+import pytest
+
+from recipes.llm import AnthropicLLM, MockLLM, UnusableResponseError, get_anthropic_llm
 
 
 def test_mock_llm_default_response():
@@ -109,9 +111,10 @@ class _FakeUsage:
 
 
 class _FakeAnthropicResponse:
-    def __init__(self, text, usage):
+    def __init__(self, text, usage, stop_reason="end_turn"):
         self.content = [_FakeContentBlock(text)]
         self.usage = usage
+        self.stop_reason = stop_reason
 
 
 class _FakeAnthropicMessages:
@@ -172,3 +175,45 @@ def test_anthropic_llm_omits_system_block_when_no_cacheable_prefix():
     assert result.cached_input_tokens == 0
     assert result.cache_creation_input_tokens == 0
     assert "system" not in llm._client.messages.last_kwargs
+
+
+def _anthropic_llm_returning(response):
+    llm = AnthropicLLM.__new__(AnthropicLLM)
+    llm._client = _FakeAnthropicClient(response)
+    return llm
+
+
+def test_anthropic_llm_sends_no_sampling_params_and_disables_thinking():
+    # claude-sonnet-5 rejects temperature/top_p/top_k with a 400, and thinks
+    # by default unless told otherwise.
+    llm = _anthropic_llm_returning(
+        _FakeAnthropicResponse(
+            text="text", usage=_FakeUsage(input_tokens=10, cache_read=0, cache_creation=0, output_tokens=5)
+        )
+    )
+
+    llm.complete(prompt="a prompt", model="claude-sonnet-5", temperature=0.0)
+
+    sent = llm._client.messages.last_kwargs
+    assert not {"temperature", "top_p", "top_k"} & sent.keys()
+    assert sent["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.parametrize(
+    ("text", "stop_reason"),
+    [("partial", "max_tokens"), ("", "refusal"), ("   ", "end_turn")],
+)
+def test_anthropic_llm_raises_on_unusable_response(text, stop_reason):
+    llm = _anthropic_llm_returning(
+        _FakeAnthropicResponse(
+            text=text,
+            usage=_FakeUsage(input_tokens=10, cache_read=0, cache_creation=0, output_tokens=5),
+            stop_reason=stop_reason,
+        )
+    )
+
+    with pytest.raises(UnusableResponseError, match=stop_reason) as excinfo:
+        llm.complete(prompt="a prompt", model="claude-sonnet-5")
+    # The call was billed, so its usage must survive the error.
+    assert excinfo.value.response.input_tokens == 10
+    assert excinfo.value.response.output_tokens == 5
