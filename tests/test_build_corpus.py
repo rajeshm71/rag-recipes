@@ -6,11 +6,12 @@ so it's imported directly by path here.
 """
 
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "corpus"))
 
-from build_corpus import CHUNK_TOKENS, chunk_text
+from build_corpus import CHUNK_OVERLAP_TOKENS, CHUNK_TOKENS, chunk_text
 
 
 class _FakeTokenizer:
@@ -57,3 +58,63 @@ def test_chunk_text_small_input_stays_one_chunk():
     text = "This is a short paper.\n\nIt has two small paragraphs."
     chunks = chunk_text(text, tokenizer)
     assert len(chunks) == 1
+
+
+def test_every_chunk_after_the_first_starts_with_the_previous_chunks_last_64_tokens():
+    tokenizer = _FakeTokenizer()
+    # Paragraphs longer than the overlap: carrying "the whole last paragraph
+    # if it is short enough" would carry nothing here.
+    paragraphs = [" ".join(f"p{p}w{i}" for i in range(100)) for p in range(20)]
+    chunks = chunk_text("\n\n".join(paragraphs), tokenizer)
+
+    assert len(chunks) > 2
+    for prev, cur in pairwise(chunks):
+        assert cur.split()[:CHUNK_OVERLAP_TOKENS] == prev.split()[-CHUNK_OVERLAP_TOKENS:]
+
+
+def test_split_paragraph_pieces_rejoin_without_inserted_breaks():
+    tokenizer = _FakeTokenizer()
+    text = " ".join(f"word{i}" for i in range(2000))  # one giant paragraph
+
+    chunks = chunk_text(text, tokenizer)
+
+    for chunk in chunks:
+        assert "\n" not in chunk
+        assert chunk in text
+    covered = " ".join(c.split(maxsplit=CHUNK_OVERLAP_TOKENS)[-1] if i else c for i, c in enumerate(chunks))
+    assert covered == text
+
+
+def test_fragments_fold_into_the_previous_chunk():
+    tokenizer = _FakeTokenizer()
+    big = " ".join(f"w{i}" for i in range(500))
+    text = big + "\n\n(6)\n\n" + big + "\n\nshort tail"
+
+    chunks = chunk_text(text, tokenizer)
+
+    assert chunks[-1].endswith("short tail")
+    for prev, cur in pairwise(chunks):
+        new_tokens = len(cur.split()) - CHUNK_OVERLAP_TOKENS
+        assert new_tokens >= CHUNK_OVERLAP_TOKENS, (prev[-40:], cur[:40])
+
+
+class _ByteTokenizer:
+    """One token per UTF-8 byte, so token boundaries can fall inside a
+    multi-byte character, as they can with tiktoken."""
+
+    def encode(self, text: str) -> list[int]:
+        return list(text.encode("utf-8"))
+
+    def decode(self, tokens: list[int]) -> str:
+        return bytes(tokens).decode("utf-8", errors="replace")
+
+
+def test_cuts_never_split_a_multibyte_character():
+    tokenizer = _ByteTokenizer()
+    text = "αβγδ " * 400  # 2-byte letters: half of all byte offsets are mid-character
+
+    chunks = chunk_text(text, tokenizer, chunk_tokens=100, overlap_tokens=10)
+
+    assert len(chunks) > 1
+    assert all("\ufffd" not in c for c in chunks)
+    assert all(c in text for c in chunks)

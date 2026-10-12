@@ -144,14 +144,27 @@ def _split_paragraphs(text: str) -> list[str]:
     return [p.strip() for p in paragraphs if p.strip()]
 
 
+# What decode() yields for a token slice that cuts a multi-byte character.
+_REPLACEMENT_CHAR = chr(0xFFFD)
+# Tokens a piece leaves free beside the carried overlap: the blank-line
+# join and re-tokenizing across the seam can add a few.
+_SEAM_TOKENS = 8
+
+
 def _split_oversized_paragraph(
     para: str, tokenizer, chunk_tokens: int = CHUNK_TOKENS, overlap_tokens: int = CHUNK_OVERLAP_TOKENS
 ) -> list[str]:
-    """Token-level fallback for a single paragraph that alone exceeds
-    chunk_tokens. PDF text extraction frequently loses blank-line breaks
+    """Token-level fallback for a paragraph too long to fit in a chunk
+    after the carried overlap. PDF text extraction frequently loses blank-line breaks
     (an entire page can come back as one "paragraph"), so paragraph-only
     splitting is not sufficient on its own -- without this fallback, chunks
     silently blow past the target chunk size.
+
+    Pieces are chunk_tokens - overlap_tokens - _SEAM_TOKENS long, so a piece
+    plus the overlap chunk_text() carries in front of it fits in one chunk. They are
+    consecutive slices of `para` (concatenated, they give it back exactly,
+    each later piece keeping its leading whitespace), cut on whole
+    characters: a token boundary can fall inside a multi-byte character.
 
     chunk_tokens/overlap_tokens default to the module constants (the fixed
     512/64 policy used for the main corpus); A1_chunking_study.ipynb passes
@@ -159,59 +172,107 @@ def _split_oversized_paragraph(
     corpus/chunking_strategies.py.
     """
     tokens = tokenizer.encode(para)
-    if len(tokens) <= chunk_tokens:
+    size = max(1, chunk_tokens - overlap_tokens - _SEAM_TOKENS)
+    if len(tokens) <= size:
         return [para]
 
     pieces = []
-    start = 0
-    step = chunk_tokens - overlap_tokens
+    start = offset = 0
     while start < len(tokens):
-        piece_tokens = tokens[start : start + chunk_tokens]
-        pieces.append(tokenizer.decode(piece_tokens))
-        start += step
-    return pieces
+        end = min(start + size, len(tokens))
+        prefix = tokenizer.decode(tokens[:end])
+        while end < len(tokens) and end > start + 1 and not para.startswith(prefix):
+            end -= 1
+            prefix = tokenizer.decode(tokens[:end])
+        cut = len(prefix) if para.startswith(prefix) else len(para)
+        if end == len(tokens):
+            cut = len(para)
+        pieces.append(para[offset:cut])
+        start, offset = end, cut
+    return [p for p in pieces if p.strip()]
+
+
+def _overlap_tail(text: str, tokenizer, overlap_tokens: int) -> str:
+    """The last overlap_tokens tokens of `text`, starting at a whole
+    character."""
+    if overlap_tokens <= 0:
+        return ""
+    tokens = tokenizer.encode(text)
+    start = max(0, len(tokens) - overlap_tokens)
+    while start < len(tokens) - 1 and _REPLACEMENT_CHAR in tokenizer.decode(tokens[start:]):
+        start += 1
+    # Leading whitespace only: a trailing space separates the tail from a
+    # piece that continues the same paragraph.
+    return tokenizer.decode(tokens[start:]).lstrip()
+
+
+def _join(prefix: str, parts: list[tuple[str, bool]]) -> str:
+    """Append (text, continues) parts to prefix: a part that continues the
+    previous one (a later piece of a split paragraph) is appended as is,
+    anything else starts a new paragraph. Trailing whitespace is kept for
+    the same reason as in _overlap_tail; callers strip what they store."""
+    out = prefix
+    for text, continues in parts:
+        if not out.strip():
+            out = text.lstrip()
+        elif continues:
+            out += text
+        else:
+            out = out.rstrip() + "\n\n" + text.lstrip()
+    return out
 
 
 def chunk_text(
-    text: str, tokenizer, chunk_tokens: int = CHUNK_TOKENS, overlap_tokens: int = CHUNK_OVERLAP_TOKENS
+    text: str,
+    tokenizer,
+    chunk_tokens: int = CHUNK_TOKENS,
+    overlap_tokens: int = CHUNK_OVERLAP_TOKENS,
+    min_new_tokens: int | None = None,
 ) -> list[str]:
-    """Paragraph-boundary-aware chunking to ~chunk_tokens tokens per chunk,
-    with overlap_tokens of trailing overlap carried into the next chunk.
-    Paragraphs that individually exceed chunk_tokens are split at the
-    token level as a fallback (see _split_oversized_paragraph).
+    """Paragraph-boundary-aware chunking to at most chunk_tokens tokens per
+    chunk. Every chunk after the first starts with the last overlap_tokens
+    tokens of the chunk before it. Paragraphs that individually exceed the
+    budget are split at the token level (see _split_oversized_paragraph).
+
+    A chunk whose own new text (excluding the carried overlap) is shorter
+    than min_new_tokens is folded into the chunk before it instead, so a
+    one-line paragraph or a short tail never ships as a near-copy of its
+    neighbour, so a folded chunk can exceed chunk_tokens by about
+    min_new_tokens. The default is overlap_tokens, capped at half the new
+    text a chunk has room for, so small chunk sizes still split.
 
     chunk_tokens/overlap_tokens default to the module constants; see
     _split_oversized_paragraph's docstring for why they're parametrized.
     """
-    raw_paragraphs = _split_paragraphs(text)
-    # Expand any paragraph too big to fit in one chunk on its own.
-    paragraphs: list[str] = []
-    for para in raw_paragraphs:
-        paragraphs.extend(_split_oversized_paragraph(para, tokenizer, chunk_tokens, overlap_tokens))
+    if min_new_tokens is None:
+        min_new_tokens = min(overlap_tokens, (chunk_tokens - overlap_tokens) // 2)
+    parts: list[tuple[str, bool]] = []
+    for para in _split_paragraphs(text):
+        pieces = _split_oversized_paragraph(para, tokenizer, chunk_tokens, overlap_tokens)
+        parts.extend((piece, i > 0) for i, piece in enumerate(pieces))
 
     chunks: list[str] = []
-    current_paragraphs: list[str] = []
-    current_tokens = 0
+    last_raw = ""  # the last chunk before stripping, for overlap and folding
+    overlap = ""
+    new: list[tuple[str, bool]] = []
 
-    def flush():
-        if current_paragraphs:
-            chunks.append("\n\n".join(current_paragraphs))
+    def flush() -> None:
+        nonlocal last_raw, overlap, new
+        if not new:
+            return
+        if chunks and len(tokenizer.encode(_join("", new).strip())) < min_new_tokens:
+            last_raw = _join(last_raw, new)
+            chunks[-1] = last_raw.strip()
+        else:
+            last_raw = _join(overlap, new)
+            chunks.append(last_raw.strip())
+        overlap = _overlap_tail(last_raw, tokenizer, overlap_tokens)
+        new = []
 
-    for para in paragraphs:
-        para_tokens = len(tokenizer.encode(para))
-        if current_tokens + para_tokens > chunk_tokens and current_paragraphs:
+    for part in parts:
+        if new and len(tokenizer.encode(_join(overlap, new + [part]).strip())) > chunk_tokens:
             flush()
-            # Carry the tail of the previous chunk forward as overlap.
-            overlap_text = current_paragraphs[-1]
-            overlap_tok_count = len(tokenizer.encode(overlap_text))
-            if overlap_tok_count > overlap_tokens:
-                current_paragraphs = []
-                current_tokens = 0
-            else:
-                current_paragraphs = [overlap_text]
-                current_tokens = overlap_tok_count
-        current_paragraphs.append(para)
-        current_tokens += para_tokens
+        new.append(part)
 
     flush()
     return chunks

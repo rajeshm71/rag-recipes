@@ -12,12 +12,11 @@ Inputs, both committed:
 
 Policy:
 - Body text only: everything from the "References" heading onward is dropped.
-- 512-token chunks with a 64-token overlap on paragraph boundaries, the same
-  chunk_text() as corpus/build_corpus.py, so the original three-chunk
-  corpus's chunks reappear under the same ids.
+- 512-token chunks on paragraph boundaries, each starting with the last 64
+  tokens of the chunk before it (chunk_text() in corpus/build_corpus.py).
 - `section` is derived from the paper's own headings ("1 Introduction",
   "3.2 Datasets", "Conclusion"), normalized to a small fixed vocabulary.
-- Any chunk shorter than the overlap is merged into the one before it.
+- A chunk adding fewer than 64 new tokens is merged into the one before it.
 - At most MAX_CHUNKS_PER_PAPER chunks per paper.
 
 No network access. Deterministic for a given tiktoken encoding.
@@ -41,7 +40,6 @@ from build_corpus import (
 
 CORPUS_DIR = Path(__file__).resolve().parent
 MAX_CHUNKS_PER_PAPER = 20
-MIN_TAIL_TOKENS = CHUNK_OVERLAP_TOKENS
 
 SECTIONS = (
     "abstract",
@@ -160,37 +158,43 @@ def chunk_paper(full_text: str, tokenizer, max_chunks: int = MAX_CHUNKS_PER_PAPE
     """Chunk one paper's body text. Returns dicts with text, section,
     n_tokens; chunk_index is assigned by the caller."""
     text, headings = body_text(full_text)
-    chunks = chunk_text(text, tokenizer, CHUNK_TOKENS, CHUNK_OVERLAP_TOKENS)
+    # chunk_text folds fragments (a one-line equation, a short tail) into
+    # the chunk before them, so no chunk is a near-copy of its neighbour.
+    chunks = chunk_text(text, tokenizer, CHUNK_TOKENS, CHUNK_OVERLAP_TOKENS)[:max_chunks]
 
-    # Fold any fragment shorter than the overlap into the chunk before it.
-    # Fragments appear at the tail and wherever a one-line paragraph (an
-    # equation, a page footer) sits between two full-size pieces.
-    merged: list[str] = []
-    for chunk in chunks:
-        if merged and len(tokenizer.encode(chunk)) < MIN_TAIL_TOKENS:
-            merged[-1] = merged[-1] + "\n\n" + chunk
-        else:
-            merged.append(chunk)
-    chunks = merged[:max_chunks]
-
+    # Chunks re-join paragraphs with blank lines, which can differ from the
+    # source's own whitespace, so they are located with whitespace collapsed.
+    flat, offsets = _collapse_whitespace(text)
     out: list[dict] = []
     search_from = 0
     for chunk in chunks:
-        pos = text.find(chunk, search_from)
+        pos = flat.find(_collapse_whitespace(chunk)[0], search_from)
         if pos == -1:
-            # Token-level splits re-decode text and can differ from the
-            # source by whitespace; fall back to the first 80 characters.
-            pos = text.find(chunk[:80], search_from)
-        start = pos if pos != -1 else search_from
+            raise ValueError(f"chunk not found in its source text: {chunk[:80]!r}")
         out.append(
             {
                 "text": chunk,
-                "section": section_for_offset(start, headings),
+                "section": section_for_offset(offsets[pos], headings),
                 "n_tokens": len(tokenizer.encode(chunk)),
             }
         )
-        search_from = start + 1
+        search_from = pos + 1
     return out
+
+
+def _collapse_whitespace(text: str) -> tuple[str, list[int]]:
+    """`text` with every whitespace run replaced by one space, plus the
+    offset in `text` of each character of the result."""
+    chars: list[str] = []
+    offsets: list[int] = []
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            if chars and chars[-1] == " ":
+                continue
+            ch = " "
+        chars.append(ch)
+        offsets.append(i)
+    return "".join(chars), offsets
 
 
 def build(
