@@ -1,3 +1,7 @@
+import json
+
+import pytest
+
 from recipes.embeddings import MockEmbedder
 from recipes.llm import MockLLM
 from recipes.self_query import _parse_filter, make_retrieve_and_answer
@@ -80,15 +84,30 @@ def test_no_filter_question_searches_whole_corpus():
     assert set(result.retrieved_chunk_ids) == set(FIXTURE_CORPUS.keys())
 
 
-def test_filter_matching_zero_chunks_degrades_gracefully():
+def test_filter_matching_zero_chunks_falls_back_to_the_unfiltered_ranking():
     llm = MockLLM(
         canned={FILTER_MARKER: '{"category": "cs.NONEXISTENT"}'}, default_response="final answer"
     )
     fn = make_retrieve_and_answer(FIXTURE_CORPUS, embedder=MockEmbedder(), llm=llm)
-    # Must not raise -- degrades to empty retrieved_chunk_ids / empty context.
     result = fn("Among the cs.NONEXISTENT papers, what speeds up inference?", k=5)
-    assert result.retrieved_chunk_ids == []
-    assert result.answer == "final answer"
+    # Answering from empty context helps nobody: search the whole corpus.
+    assert set(result.retrieved_chunk_ids) == set(FIXTURE_CORPUS.keys())
+    # The filter is still reported as extracted, so filter accuracy counts the miss.
+    assert result.extracted_filter == {"category": "cs.NONEXISTENT"}
+
+
+@pytest.mark.parametrize("category", ["cs.lg", "  cs.LG ", "CS.LG"])
+def test_category_filter_ignores_case_and_whitespace(category):
+    llm = MockLLM(canned={FILTER_MARKER: json.dumps({"category": category})}, default_response="final answer")
+    fn = make_retrieve_and_answer(FIXTURE_CORPUS, embedder=MockEmbedder(), llm=llm)
+    result = fn("Among the cs.LG papers, what speeds up inference?", k=5)
+    assert result.extracted_filter == {"category": "cs.LG"}
+    assert set(result.retrieved_chunk_ids) == {"c1", "c3"}
+
+
+def test_parse_filter_accepts_a_whole_number_float_year():
+    assert _parse_filter('{"year": 2024.0}') == {"year": 2024}
+    assert _parse_filter('{"year": 2024.5}') == {}
 
 
 def test_token_counts_summed_across_both_calls():

@@ -45,10 +45,12 @@ def _coerce_filter_value(field: str, value: object) -> str | int | None:
             return None
         if isinstance(value, int):
             return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
         if isinstance(value, str) and value.strip().isdigit():
             return int(value.strip())
         return None
-    return value if isinstance(value, str) and value.strip() else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _parse_filter(text: str) -> dict:
@@ -90,6 +92,13 @@ def make_retrieve_and_answer(
     filter_template = SELF_QUERY_PROMPT_PATH.read_text(encoding="utf-8")
     gen_template = _GENERATION_PROMPT_PATH.read_text(encoding="utf-8")
     all_ids = list(corpus_by_id.keys())
+    # Category values as the corpus spells them, keyed case-insensitively,
+    # so "cs.lg" from the LLM filters on the corpus's "cs.LG".
+    known_categories = {
+        chunk["category"].lower(): chunk["category"]
+        for chunk in corpus_by_id.values()
+        if isinstance(chunk.get("category"), str)
+    }
 
     def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations:
         start = time.perf_counter()
@@ -97,6 +106,9 @@ def make_retrieve_and_answer(
         filter_prompt = filter_template.format(question=question)
         filter_response = llm.complete(prompt=filter_prompt, model=generation_model, temperature=0.0)
         extracted_filter = _parse_filter(filter_response.text)
+        if "category" in extracted_filter:
+            category = extracted_filter["category"]
+            extracted_filter["category"] = known_categories.get(category.lower(), category)
 
         # Rank the WHOLE corpus, then filter by metadata, then slice to
         # top-k -- one code path whether or not a filter was extracted (an
@@ -107,11 +119,18 @@ def make_retrieve_and_answer(
             store, embedder, embedding_model, question, k=min(len(all_ids), _MAX_KNN_K)
         )
         if extracted_filter:
-            ranked_ids = [
+            filtered_ids = [
                 cid
                 for cid in ranked_ids
                 if all(corpus_by_id[cid].get(field) == value for field, value in extracted_filter.items())
             ]
+            # A filter that matches nothing (a category or year the corpus
+            # doesn't have) would leave the answer with no context at all;
+            # the unfiltered ranking is the better fallback. extracted_filter
+            # still reports the filter as extracted, so filter accuracy
+            # scores it as the miss it is.
+            if filtered_ids:
+                ranked_ids = filtered_ids
         retrieved_ids = ranked_ids[:k]
 
         context = "\n\n".join(
