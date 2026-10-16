@@ -144,6 +144,22 @@ def make_retrieve_and_answer(
             ranked_lists.append(ids)
             transcript.append({**step, "observation": _render_observation(ids, corpus_by_id)})
 
+        if not ranked_lists:
+            # The agent stopped without searching (an unparseable first
+            # reply, or an immediate finish). Answering from empty context
+            # helps nobody, so fall back to one dense search on the question
+            # and record it as an automatic step, not the agent's choice.
+            ids = dense_search(store, embedder, embedding_model, question, tool_k)
+            ranked_lists.append(ids)
+            transcript.append(
+                {
+                    "thought": "(no search was run; automatic dense search on the question)",
+                    "action": "search_dense",
+                    "action_input": question,
+                    "observation": _render_observation(ids, corpus_by_id),
+                }
+            )
+
         retrieved_ids = rrf_fuse(ranked_lists, k)
         context = "\n\n".join(
             f"[{cid}] {corpus_by_id[cid]['text']}" for cid in retrieved_ids if cid in corpus_by_id

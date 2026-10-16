@@ -1,3 +1,5 @@
+import pytest
+
 from recipes.agentic import _parse_agent_action, make_retrieve_and_answer
 from recipes.embeddings import MockEmbedder
 from recipes.llm import MockLLM
@@ -96,3 +98,34 @@ def test_malformed_response_mid_loop_forces_finish_without_crashing():
     # decision call + 1 final generation call, not a crash or infinite loop.
     assert len(llm.calls) == 2
     assert result.answer == "final answer"
+
+
+@pytest.mark.parametrize(
+    "first_reply",
+    ['{"thought": "enough", "action": "finish", "action_input": ""}', "this is not valid JSON"],
+)
+def test_agent_that_never_searches_falls_back_to_one_dense_search(first_reply):
+    llm = MockLLM(canned={AGENT_MARKER: first_reply}, default_response="final answer")
+    fn = make_retrieve_and_answer(FIXTURE_CORPUS, embedder=MockEmbedder(), llm=llm, max_iterations=4)
+    result = fn("What speeds up LLM inference?", k=2)
+
+    assert len(result.retrieved_chunk_ids) == 2
+    final_prompt = llm.calls[-1].prompt
+    assert all(f"[{cid}]" in final_prompt for cid in result.retrieved_chunk_ids)
+    # The automatic search is visible in the trace and costs no extra LLM call.
+    last = result.tool_call_trace[-1]
+    assert last["action"] == "search_dense"
+    assert last["action_input"] == "What speeds up LLM inference?"
+    assert "automatic" in last["thought"]
+    assert len(llm.calls) == 2
+
+
+def test_no_fallback_search_once_the_agent_has_searched():
+    llm = MockLLM(
+        canned={AGENT_MARKER: '{"thought": "look", "action": "search_bm25", "action_input": "inference"}'},
+        default_response="final answer",
+    )
+    fn = make_retrieve_and_answer(FIXTURE_CORPUS, embedder=MockEmbedder(), llm=llm, max_iterations=2)
+    result = fn("What speeds up LLM inference?", k=2)
+
+    assert [s["action"] for s in result.tool_call_trace] == ["search_bm25", "search_bm25"]
