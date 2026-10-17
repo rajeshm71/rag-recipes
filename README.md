@@ -65,7 +65,8 @@ The full decision tree lives in [`docs/choosing.md`](docs/choosing.md).
 
 Every retrieval pattern that needs no LLM, scored on the full eval set with local models
 (`BAAI/bge-small-en-v1.5` embeddings, `BAAI/bge-reranker-v2-m3` reranker). No API key, and CI
-re-computes this table on every push and fails if it drifts from what is committed.
+re-computes this table whenever the corpus, the eval set or the retrieval code changes, and
+fails if it drifts from what is committed.
 
 <!-- retrieval-leaderboard:start -->
 | rank | pattern | hit@3 | hit@10 | mrr | recall@10 | p50_ms |

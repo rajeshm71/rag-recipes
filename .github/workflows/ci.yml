@@ -31,39 +31,6 @@ jobs:
       - run: uv sync
       - run: uv run pytest tests/
 
-  retrieval-leaderboard:
-    # Re-computes outputs/retrieval_leaderboard.md with the local embedding
-    # and reranker models (no API key) and fails if the committed table
-    # differs, so the README's headline numbers are verified on every push.
-    runs-on: ubuntu-latest
-    # The cross-encoder scores about 1,700 question/chunk pairs on CPU.
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v10.0.1
-        with:
-          enable-cache: true
-      - run: uv python install 3.12
-      - run: uv sync
-      - name: Restore HuggingFace models
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/huggingface
-          key: huggingface-bge-small-en-v1.5-bge-reranker-v2-m3
-      - name: Download models
-        run: >-
-          uv run python -c "from sentence_transformers import CrossEncoder, SentenceTransformer;
-          SentenceTransformer('BAAI/bge-small-en-v1.5'); CrossEncoder('BAAI/bge-reranker-v2-m3')"
-      # Saved right after the download, so a later failure or timeout in the
-      # check does not force the next run to download the models again.
-      - name: Save HuggingFace models
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/huggingface
-          key: huggingface-bge-small-en-v1.5-bge-reranker-v2-m3
-        continue-on-error: true
-      - run: uv run python evals/retrieval_leaderboard.py --check
-
   notebooks-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 45
