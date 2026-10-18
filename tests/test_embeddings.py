@@ -77,8 +77,9 @@ def test_local_embedder_maps_response_fields():
 
 
 class _FakeOpenAIEmbeddingItem:
-    def __init__(self, embedding):
+    def __init__(self, embedding, index):
         self.embedding = embedding
+        self.index = index
 
 
 class _FakeOpenAIUsage:
@@ -87,23 +88,34 @@ class _FakeOpenAIUsage:
 
 
 class _FakeOpenAIEmbeddingResponse:
-    def __init__(self, vectors, prompt_tokens):
-        self.data = [_FakeOpenAIEmbeddingItem(v) for v in vectors]
+    def __init__(self, vectors, prompt_tokens, reverse=False):
+        self.data = [_FakeOpenAIEmbeddingItem(v, i) for i, v in enumerate(vectors)]
+        if reverse:
+            self.data.reverse()
         self.usage = _FakeOpenAIUsage(prompt_tokens)
 
 
 class _FakeOpenAIEmbeddingsEndpoint:
-    def __init__(self):
+    def __init__(self, reverse=False):
         self.calls: list[list[str]] = []
+        self.reverse = reverse
 
     def create(self, model, input):
         self.calls.append(list(input))
-        return _FakeOpenAIEmbeddingResponse([[float(len(t))] for t in input], prompt_tokens=len(input))
+        return _FakeOpenAIEmbeddingResponse(
+            [[float(len(t))] for t in input], prompt_tokens=len(input), reverse=self.reverse
+        )
 
 
 class _FakeOpenAIClient:
-    def __init__(self):
-        self.embeddings = _FakeOpenAIEmbeddingsEndpoint()
+    def __init__(self, reverse=False):
+        self.embeddings = _FakeOpenAIEmbeddingsEndpoint(reverse)
+
+
+def _openai_embedder(client):
+    embedder = OpenAIEmbedder.__new__(OpenAIEmbedder)  # no real client, no key
+    embedder._client = client
+    return embedder
 
 
 def test_openai_embedder_batches_under_token_budget(monkeypatch):
@@ -125,6 +137,29 @@ def test_openai_embedder_batches_under_token_budget(monkeypatch):
     assert all(len(call) <= 2 for call in fake_client.embeddings.calls)
     assert len(result.vectors) == 5
     assert result.input_tokens == sum(len(call) for call in fake_client.embeddings.calls)
+
+
+def test_openai_embedder_caps_inputs_per_request(monkeypatch):
+    # OpenAI also rejects more than 2048 inputs per request, however few
+    # tokens they hold. Short texts never reach the token budget, so only
+    # the input cap splits them.
+    monkeypatch.setattr("recipes.embeddings._OPENAI_MAX_INPUTS_PER_REQUEST", 3)
+    client = _FakeOpenAIClient()
+
+    result = _openai_embedder(client).embed([f"t{i}" for i in range(7)], model="text-embedding-3-small")
+
+    assert [len(call) for call in client.embeddings.calls] == [3, 3, 1]
+    assert len(result.vectors) == 7
+
+
+def test_openai_embedder_orders_vectors_by_index_not_response_order():
+    client = _FakeOpenAIClient(reverse=True)
+    texts = ["a", "bb", "ccc"]
+
+    result = _openai_embedder(client).embed(texts, model="text-embedding-3-small")
+
+    # The fake embeds each text as [len(text)]: input order must be restored.
+    assert result.vectors == [[1.0], [2.0], [3.0]]
 
 
 def test_get_voyage_embedder_respects_env_var(monkeypatch):

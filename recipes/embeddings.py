@@ -20,16 +20,20 @@ class Embedder(Protocol):
     def embed(self, texts: list[str], model: str) -> EmbeddingResponse: ...
 
 
-def _batch_by_token_budget(texts: list[str], max_tokens: int) -> list[list[str]]:
+def _batch_by_token_budget(
+    texts: list[str], max_tokens: int, max_items: int | None = None
+) -> list[list[str]]:
     """Split `texts` into sub-batches, each under `max_tokens` estimated
-    tokens. A single text exceeding the budget on its own still gets its
-    own one-item batch (the API's per-request cap, not a per-item one)."""
+    tokens and, if given, at most `max_items` texts. A single text exceeding
+    the token budget on its own still gets its own one-item batch (the API's
+    per-request cap, not a per-item one)."""
     batches: list[list[str]] = []
     current: list[str] = []
     current_tokens = 0
     for text in texts:
         text_tokens = _estimate_tokens(text)
-        if current and current_tokens + text_tokens > max_tokens:
+        full = max_items is not None and len(current) >= max_items
+        if current and (full or current_tokens + text_tokens > max_tokens):
             batches.append(current)
             current = []
             current_tokens = 0
@@ -45,6 +49,8 @@ def _batch_by_token_budget(texts: list[str], max_tokens: int) -> list[list[str]]
 # run: a re-chunked corpus's full text batch requested 400_506 tokens in one
 # call and was rejected with `max_tokens_per_request`).
 _OPENAI_MAX_TOKENS_PER_REQUEST = 250_000
+# The same endpoint also rejects more than 2048 inputs in one request.
+_OPENAI_MAX_INPUTS_PER_REQUEST = 2048
 
 
 def _estimate_tokens(text: str) -> int:
@@ -65,9 +71,14 @@ class OpenAIEmbedder:
         start = time.perf_counter()
         vectors: list[list[float]] = []
         input_tokens = 0
-        for batch in _batch_by_token_budget(texts, _OPENAI_MAX_TOKENS_PER_REQUEST):
+        batches = _batch_by_token_budget(
+            texts, _OPENAI_MAX_TOKENS_PER_REQUEST, _OPENAI_MAX_INPUTS_PER_REQUEST
+        )
+        for batch in batches:
             response = self._client.embeddings.create(model=model, input=batch)
-            vectors.extend(item.embedding for item in response.data)
+            # Each item carries the position of its input; order by it rather
+            # than trusting the response order (same as VoyageEmbedder).
+            vectors.extend(item.embedding for item in sorted(response.data, key=lambda item: item.index))
             input_tokens += response.usage.prompt_tokens if response.usage else 0
         latency_ms = (time.perf_counter() - start) * 1000
         return EmbeddingResponse(vectors=vectors, input_tokens=input_tokens, latency_ms=latency_ms)
