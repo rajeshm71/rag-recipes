@@ -152,7 +152,8 @@ factory entry, matching the existing 10 entries' shape).
 ruff check .
 python scripts/lint_notebooks.py
 pytest tests/
-RAG_RECIPES_LLM=mock uv run papermill notebooks/<NN>_<name>.ipynb notebooks/<NN>_<name>.ipynb --cwd notebooks
+RAG_RECIPES_LLM=mock uv run papermill notebooks/<NN>_<name>.ipynb /tmp/<NN>_<name>.out.ipynb --cwd notebooks
 ```
 
-All four must pass before opening a PR.
+All four must pass before opening a PR. The smoke run writes its executed copy to `/tmp`, so the
+notebook you commit keeps its outputs stripped.

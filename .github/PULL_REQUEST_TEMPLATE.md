@@ -13,7 +13,7 @@
 - [ ] `ruff check .`
 - [ ] `python scripts/lint_notebooks.py`
 - [ ] `pytest tests/`
-- [ ] `RAG_RECIPES_LLM=mock papermill notebooks/<affected>.ipynb notebooks/<affected>.ipynb --cwd notebooks`
+- [ ] `RAG_RECIPES_LLM=mock uv run papermill notebooks/<affected>.ipynb /tmp/<affected>.out.ipynb --cwd notebooks`
 
 ## Checklist
 
