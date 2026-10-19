@@ -6,8 +6,7 @@
 
 rag-recipes is a benchmark suite for RAG (retrieval-augmented generation) patterns. It runs 10
 distinct patterns, from naive dense retrieval through agentic RAG, against the same corpus, the
-same eval set, and the same held-constant generation prompt, producing a single fair comparison
-instead of scattered one-off blog benchmarks. Every pattern ships as both a runnable notebook and
+same eval set, and the same held-constant generation prompt. Every pattern ships as both a runnable notebook and
 an importable Python function under `recipes/`, ready to copy into another project (together with
 the small shared modules it imports and the `prompts/` folder).
 
@@ -40,8 +39,8 @@ the small shared modules it imports and the `prompts/` folder).
 | 09 | Multi-hop retrieval | [09_multi_hop.ipynb](notebooks/09_multi_hop.ipynb) | For chained-fact questions |
 | 10 | Agentic RAG | [10_agentic.ipynb](notebooks/10_agentic.ipynb) | Most flexible. Hardest to debug |
 
-Each pattern is both a notebook (with a required "Where this pattern FAILS" section -- wins alone
-aren't the point) and an importable function in `recipes/<pattern>.py`. To use one in your own
+Each pattern is both a notebook, which includes a "Where this pattern FAILS" section, and an
+importable function in `recipes/<pattern>.py`. To use one in your own
 project, copy that file plus the shared modules it imports (`recipes/store.py`, `dense_index.py`,
 `embeddings.py`, `llm.py`, and for hybrid patterns `bm25.py`/`hybrid.py`) and the `prompts/`
 folder -- this repo is a recipe collection, not an installable library.
@@ -143,9 +142,9 @@ jupyter lab notebooks/
 
 ## Non-goals
 
-Explicitly out of scope for this repo: multimodal RAG (images, tables inside PDFs), Graph RAG
-(different mental model, deserves its own repo), fine-tuning embeddings, production infrastructure
-(drift monitoring, feature stores, online evals), serving/streaming benchmarks.
+Out of scope for this repo: multimodal RAG (images, tables inside PDFs), Graph RAG, fine-tuning
+embeddings, production infrastructure (drift monitoring, feature stores, online evals),
+serving/streaming benchmarks.
 
 ## Contributing and license
 
