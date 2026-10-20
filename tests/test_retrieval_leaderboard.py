@@ -5,6 +5,8 @@ mock embedder and reranker: every row is produced, the table renders, and
 import json
 import time
 
+import pytest
+
 from evals.retrieval_leaderboard import (
     README_END,
     README_START,
@@ -132,3 +134,16 @@ def test_reused_pairs_are_charged_to_the_rows_latency(tmp_path):
 
     hybrid_rerank = next(r for r in rows if r.name == "03+04_hybrid_rerank")
     assert hybrid_rerank.p50_latency_ms >= len(CORPUS) * _SlowReranker.SECONDS_PER_PAIR * 1000
+
+
+def test_p50_latency_uses_the_shared_percentile_definition(monkeypatch):
+    # Four questions taking 1, 2, 3 and 4 ms: the median of an even count is
+    # the mean of the two middle values (2.5), as evals/metrics.py reports
+    # p50 everywhere else, not the upper middle value (3).
+    ticks = iter([0.0, 0.001, 1.0, 1.002, 2.0, 2.003, 3.0, 3.004])
+    monkeypatch.setattr("evals.retrieval_leaderboard.time.perf_counter", lambda: next(ticks))
+    qa = [{"qid": f"q{i}", "question": f"q{i}", "relevant_chunk_ids": ["c1"]} for i in range(4)]
+
+    row = score("fixed", lambda q, k: ["c1"], qa)
+
+    assert row.p50_latency_ms == pytest.approx(2.5)

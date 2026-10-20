@@ -30,7 +30,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from evals.metrics import ConfidenceInterval, bootstrap_ci, hit_at_k, mrr, recall_at_k
+from evals.metrics import (
+    ConfidenceInterval,
+    bootstrap_ci,
+    hit_at_k,
+    latency_percentiles,
+    mrr,
+    recall_at_k,
+)
 from evals.run import load_corpus_by_id, load_qa_set
 from recipes.bm25 import BM25Index
 from recipes.dense_index import build_dense_index, dense_search
@@ -165,14 +172,13 @@ def score(
                 "retrieved": ids[:k],
             }
         )
-    lat_sorted = sorted(lat)
     return Row(
         name=name,
         hit_at_3=bootstrap_ci(h3),
         hit_at_10=bootstrap_ci(h10),
         mrr=bootstrap_ci(rr),
         recall_at_10=bootstrap_ci(rec),
-        p50_latency_ms=lat_sorted[len(lat_sorted) // 2] if lat_sorted else 0.0,
+        p50_latency_ms=latency_percentiles(lat)[0],
         per_question=per_question,
     )
 
