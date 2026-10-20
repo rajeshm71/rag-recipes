@@ -147,3 +147,20 @@ def test_p50_latency_uses_the_shared_percentile_definition(monkeypatch):
     row = score("fixed", lambda q, k: ["c1"], qa)
 
     assert row.p50_latency_ms == pytest.approx(2.5)
+
+
+def test_render_shows_mrr_vs_top_with_ties_marked():
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
+    rows = [score(name, fn, QA) for name, fn in retrievers.items()]
+    md = render(rows, len(QA), len(CORPUS), "mock", "mock")
+    body = [line for line in md.splitlines() if line.startswith("| ") and not line.startswith("| rank")]
+
+    assert "mrr_vs_top" in md
+    assert body[0].split(" | ")[6] == "--"
+    for line in body[1:]:
+        cell = line.split(" | ")[6]
+        assert cell.startswith(("+", "-"))
+        # Two questions cannot separate any pattern from the top one.
+        assert cell.endswith("(tie)")
+    # The comparable part still drops only the latency column.
+    assert "mrr_vs_top" in strip_latency(md) and "p50_ms" not in strip_latency(md)

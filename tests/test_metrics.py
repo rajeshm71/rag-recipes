@@ -1,9 +1,12 @@
+import pytest
+
 from evals.metrics import (
     bootstrap_ci,
     filter_accuracy,
     hit_at_k,
     latency_percentiles,
     mrr,
+    paired_difference_ci,
     paper_hit_at_k,
     recall_at_k,
 )
@@ -121,3 +124,21 @@ def test_latency_percentiles():
 
 def test_latency_percentiles_empty():
     assert latency_percentiles([]) == (0.0, 0.0)
+
+
+def test_paired_difference_ci_uses_per_question_differences():
+    # Two rows whose per-row intervals overlap heavily, but b beats a by
+    # exactly 0.1 on every question: the paired interval excludes 0.
+    a = [0.1, 0.5, 0.9, 0.2, 0.6, 1.0, 0.3, 0.7]
+    b = [x + 0.1 for x in a]
+    ci = paired_difference_ci(b, a)
+    assert ci.mean == pytest.approx(0.1)
+    assert ci.lower == pytest.approx(0.1) and ci.upper == pytest.approx(0.1)
+
+    same = paired_difference_ci(a, a)
+    assert (same.mean, same.lower, same.upper) == (0.0, 0.0, 0.0)
+
+
+def test_paired_difference_ci_requires_the_same_questions():
+    with pytest.raises(ValueError):
+        paired_difference_ci([1.0, 0.0], [1.0])

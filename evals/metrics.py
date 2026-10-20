@@ -110,6 +110,25 @@ def bootstrap_ci(
     return ConfidenceInterval(mean=float(arr.mean()), lower=lower, upper=upper)
 
 
+def paired_difference_ci(
+    values: list[float],
+    baseline: list[float],
+    n_resamples: int = BOOTSTRAP_RESAMPLES,
+    confidence: float = CONFIDENCE_LEVEL,
+    seed: int = BOOTSTRAP_SEED,
+) -> ConfidenceInterval:
+    """Bootstrap interval for mean(values) - mean(baseline) when both were
+    scored on the same questions, in the same order. Resampling the
+    per-question differences keeps the pairing, which two separate
+    per-row intervals ignore: two patterns can have overlapping intervals
+    and still differ reliably on the same questions, and vice versa.
+    """
+    if len(values) != len(baseline):
+        raise ValueError("paired scores must cover the same questions")
+    differences = [v - b for v, b in zip(values, baseline)]
+    return bootstrap_ci(differences, n_resamples=n_resamples, confidence=confidence, seed=seed)
+
+
 def latency_percentiles(latencies_ms: list[float]) -> tuple[float, float]:
     """Returns (p50, p95) wall-clock latency in milliseconds."""
     if not latencies_ms:

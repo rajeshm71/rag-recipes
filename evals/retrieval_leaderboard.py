@@ -24,7 +24,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -36,6 +36,7 @@ from evals.metrics import (
     hit_at_k,
     latency_percentiles,
     mrr,
+    paired_difference_ci,
     recall_at_k,
 )
 from evals.run import load_corpus_by_id, load_qa_set
@@ -66,6 +67,9 @@ class Row:
     # One record per question: qid, category, rank of the first relevant
     # chunk (None if outside the top k), recall@10, and the top-10 ids.
     per_question: list[dict]
+    # Per-question reciprocal ranks in eval-set order, for paired comparisons
+    # between rows scored on the same questions.
+    reciprocal_ranks: list[float] = field(default_factory=list)
 
 
 class PairScoreCache:
@@ -180,11 +184,22 @@ def score(
         recall_at_10=bootstrap_ci(rec),
         p50_latency_ms=latency_percentiles(lat)[0],
         per_question=per_question,
+        reciprocal_ranks=rr,
     )
 
 
 def _ci(ci: ConfidenceInterval) -> str:
     return f"{ci.mean:.3f} [{ci.lower:.3f}, {ci.upper:.3f}]"
+
+
+def _vs_top(row: Row, top: Row) -> str:
+    """MRR difference from the top row with its paired bootstrap interval,
+    marked "(tie)" when the interval contains 0."""
+    if row is top:
+        return "--"
+    ci = paired_difference_ci(row.reciprocal_ranks, top.reciprocal_ranks)
+    tie = " (tie)" if ci.lower <= 0 <= ci.upper else ""
+    return f"{ci.mean:+.3f} [{ci.lower:+.3f}, {ci.upper:+.3f}]{tie}"
 
 
 def render(rows: list[Row], n_questions: int, n_chunks: int, embedding_model: str, reranker_model: str) -> str:
@@ -195,16 +210,19 @@ def render(rows: list[Row], n_questions: int, n_chunks: int, embedding_model: st
         (
             f"{n_questions} questions, {n_chunks} chunks, k=10. Embeddings: `{embedding_model}`. "
             f"Reranker: `{reranker_model}`. Ranked by MRR, then recall@10, then hit@3. "
-            "95% bootstrap confidence intervals (1000 resamples, seed 42)."
+            "95% bootstrap confidence intervals (1000 resamples, seed 42). mrr_vs_top is each "
+            "row's MRR minus the top row's, bootstrapped over per-question differences; "
+            '"(tie)" marks an interval that contains 0.'
         ),
         "",
-        "| rank | pattern | hit@3 | hit@10 | mrr | recall@10 | p50_ms |",
-        "|---|---|---|---|---|---|---|",
+        "| rank | pattern | hit@3 | hit@10 | mrr | recall@10 | mrr_vs_top | p50_ms |",
+        "|---|---|---|---|---|---|---|---|",
     ]
+    top = ranked[0] if ranked else None
     for i, r in enumerate(ranked, start=1):
         lines.append(
             f"| {i} | {r.name} | {_ci(r.hit_at_3)} | {_ci(r.hit_at_10)} | {_ci(r.mrr)} | "
-            f"{_ci(r.recall_at_10)} | {r.p50_latency_ms:.1f} |"
+            f"{_ci(r.recall_at_10)} | {_vs_top(r, top)} | {r.p50_latency_ms:.1f} |"
         )
     return "\n".join(lines) + "\n"
 

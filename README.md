@@ -68,19 +68,21 @@ re-computes this table whenever the corpus, the eval set or the retrieval code c
 fails if it drifts from what is committed.
 
 <!-- retrieval-leaderboard:start -->
-| rank | pattern | hit@3 | hit@10 | mrr | recall@10 | p50_ms |
-|---|---|---|---|---|---|---|
-| 1 | 03+04_hybrid_rerank | 0.894 [0.818, 0.955] | 0.955 [0.894, 1.000] | 0.807 [0.726, 0.879] | 0.924 [0.864, 0.970] | 1641.1 |
-| 2 | 04_bm25_rerank | 0.864 [0.773, 0.939] | 0.894 [0.818, 0.955] | 0.785 [0.690, 0.867] | 0.856 [0.780, 0.932] | 1597.4 |
-| 3 | 02_bm25 | 0.727 [0.621, 0.833] | 0.848 [0.758, 0.924] | 0.673 [0.570, 0.769] | 0.826 [0.735, 0.909] | 1.5 |
-| 4 | 03_hybrid_rrf | 0.697 [0.576, 0.803] | 0.955 [0.894, 1.000] | 0.605 [0.515, 0.699] | 0.924 [0.864, 0.977] | 13.0 |
-| 5 | 01_naive_dense | 0.652 [0.530, 0.773] | 0.894 [0.818, 0.955] | 0.554 [0.459, 0.651] | 0.848 [0.773, 0.917] | 12.2 |
+| rank | pattern | hit@3 | hit@10 | mrr | recall@10 | mrr_vs_top | p50_ms |
+|---|---|---|---|---|---|---|---|
+| 1 | 03+04_hybrid_rerank | 0.894 [0.818, 0.955] | 0.955 [0.894, 1.000] | 0.807 [0.726, 0.879] | 0.924 [0.864, 0.970] | -- | 1762.8 |
+| 2 | 04_bm25_rerank | 0.864 [0.773, 0.939] | 0.894 [0.818, 0.955] | 0.785 [0.690, 0.867] | 0.856 [0.780, 0.932] | -0.022 [-0.060, +0.000] (tie) | 1741.1 |
+| 3 | 02_bm25 | 0.727 [0.621, 0.833] | 0.848 [0.758, 0.924] | 0.673 [0.570, 0.769] | 0.826 [0.735, 0.909] | -0.134 [-0.218, -0.053] | 1.2 |
+| 4 | 03_hybrid_rrf | 0.697 [0.576, 0.803] | 0.955 [0.894, 1.000] | 0.605 [0.515, 0.699] | 0.924 [0.864, 0.977] | -0.202 [-0.285, -0.125] | 12.5 |
+| 5 | 01_naive_dense | 0.652 [0.530, 0.773] | 0.894 [0.818, 0.955] | 0.554 [0.459, 0.651] | 0.848 [0.773, 0.917] | -0.253 [-0.361, -0.153] | 9.4 |
 <!-- retrieval-leaderboard:end -->
 
 Columns: hit@k is whether any relevant chunk is in the top k; MRR is the reciprocal rank of the
 first relevant chunk; recall@10 is the fraction of a question's relevant chunks in the top 10, which
 is what separates patterns on the multi-hop questions. Brackets are 95% bootstrap confidence
-intervals. Latency is per query on the machine that produced the table. Reproduce it with:
+intervals. mrr_vs_top is each pattern's MRR minus the top pattern's, with an interval bootstrapped
+over the per-question differences; "(tie)" means the eval set cannot tell the two apart. Latency is
+per query on the machine that produced the table. Reproduce it with:
 
 ```bash
 uv run python evals/retrieval_leaderboard.py
