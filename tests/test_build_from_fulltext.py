@@ -119,3 +119,61 @@ def test_chunk_paper_merges_tiny_fragments():
     assert chunks[-1]["text"].endswith("short tail here now ok")
     assert any("(6)" in c["text"] for c in chunks)
     assert all(c["n_tokens"] >= 64 for c in chunks)
+
+
+OUTLINE_LINES = [
+    "1 University of Southern California, Los Angeles, CA 90007, USA",
+    "Abstract",
+    "1 Introduction",
+    "2 Reinforcement Learning",
+    "2.1 Markov Decision Process",
+    "1. Equality and Symmetry:",
+    "Method",
+    "199 Request ID",
+    "3 Method",
+    "3.1 Experiment Setup Details",
+    "3.2 Something Unusual",
+    "Limitations",
+    "References",
+]
+OUTLINE_PAPER = "\n".join(OUTLINE_LINES)
+
+
+def test_find_headings_keeps_only_the_paper_outline():
+    titles = [t for _, t, _ in find_headings(OUTLINE_PAPER)]
+    assert titles == [
+        "Abstract",
+        "Introduction",
+        "Reinforcement Learning",
+        "Markov Decision Process",
+        "Method",
+        "Experiment Setup Details",
+        "Something Unusual",
+        "Limitations",
+        "References",
+    ]
+    # Rejected: the affiliation, the numbered list item inside section 2,
+    # a bare "Method" table cell after numbering started, and the figure
+    # label "199 Request ID".
+
+
+def test_section_labels_follow_the_top_level_section():
+    labels = {t: label for _, t, label in find_headings(OUTLINE_PAPER)}
+    # An unrecognized top-level section is "other", not the previous label.
+    assert labels["Reinforcement Learning"] == "other"
+    # Its unrecognized sub-section stays "other" too.
+    assert labels["Markov Decision Process"] == "other"
+    # Sub-sections of a recognized section take that section's label.
+    assert labels["Experiment Setup Details"] == "methods"
+    assert labels["Something Unusual"] == "methods"
+    assert labels["Limitations"] == "discussion"
+
+
+def test_outline_tolerates_one_missed_heading_but_not_a_jump():
+    text = "1 Introduction\n2 Method\n4 Experiments\n9 Figure Label"
+    assert [t for _, t, _ in find_headings(text)] == ["Introduction", "Method", "Experiments"]
+
+
+def test_normalize_section_ignores_spaces_lost_or_added_by_pdf_extraction():
+    assert normalize_section("RELATEDWORKS") == "related_work"
+    assert normalize_section("The Hybrid Agentic F ramework") == "methods"

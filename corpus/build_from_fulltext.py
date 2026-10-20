@@ -80,6 +80,15 @@ _BARE_TITLES = {
     "appendix",
 }
 _STOP_TITLES = {"references", "bibliography"}
+# Un-numbered titles still accepted once a paper's numbered outline has
+# started (back matter, including the unnumbered Limitations section many
+# venues require). Any other bare title after that point is a table cell or a figure
+# label ("Method" as a column header), not a section.
+_BACK_MATTER_TITLES = _STOP_TITLES | {"acknowledgments", "acknowledgements", "appendix", "limitations"}
+# A numbered heading may skip ahead by at most this much, so one heading the
+# detector missed does not reject every heading after it, while a figure
+# label like "199 Request ID" is still rejected.
+_MAX_OUTLINE_STEP = 2
 
 _LABEL_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("abstract", ("abstract",)),
@@ -101,28 +110,71 @@ _LABEL_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def normalize_section(title: str) -> str:
     """Map a heading title to one of SECTIONS ("other" if nothing matches)."""
-    t = title.lower()
+    # PDF extraction often drops or inserts spaces ("RELATEDWORKS",
+    # "F ramework"), so match with all spaces removed.
+    t = title.lower().replace(" ", "")
     for label, needles in _LABEL_RULES:
-        if any(n in t for n in needles):
+        if any(n.replace(" ", "") in t for n in needles):
             return label
     return "other"
 
 
+def _looks_like_affiliation(title: str) -> bool:
+    """Author affiliations come out of PDFs as numbered, Title-case lines
+    ("1 University of Southern California, Los Angeles, CA 90007, USA").
+    Section titles almost never combine a comma with a digit."""
+    return "," in title and any(ch.isdigit() for ch in title)
+
+
+def _continues_outline(parts: list[int], outline: list[int]) -> bool:
+    """Whether a heading numbered `parts` (2.1 -> [2, 1]) can follow the
+    numbered headings seen so far (`outline`, the last accepted number).
+    Each level must move forward by 1 to _MAX_OUTLINE_STEP from the level
+    above it, which rejects numbered list items ("1. Equality and
+    Symmetry:" inside section 3) and figure labels."""
+    depth = len(parts)
+    if parts[: depth - 1] != outline[: depth - 1] or len(outline) < depth - 1:
+        return False
+    previous = outline[depth - 1] if len(outline) >= depth else 0
+    return 1 <= parts[depth - 1] - previous <= _MAX_OUTLINE_STEP
+
+
 def find_headings(text: str) -> list[tuple[int, str, str]]:
     """Return (char_offset, raw_title, label) for every heading line in
-    reading order. Un-numbered lines count only when they are one of the
-    conventional bare section titles; numbered lines always count.
+    reading order. `label` is already resolved for the section the heading
+    opens:
+
+    - Numbered lines count when they continue the paper's outline
+      (_continues_outline) and are not affiliations.
+    - Un-numbered lines count when they are a conventional bare section
+      title, and only before the numbered outline starts or as back matter.
+    - A top-level heading gets its own label ("other" if it matches no
+      rule). A numbered sub-heading takes its section's label, or its own
+      when the section's label is "other".
     """
     headings: list[tuple[int, str, str]] = []
+    outline: list[int] = []
+    section_label: str | None = None
     offset = 0
     for line in text.split("\n"):
         stripped = line.strip()
         match = _HEADING_RE.match(stripped)
         if match:
             title = match.group("title").strip()
-            numbered = match.group("num") is not None
-            if numbered or title.lower() in _BARE_TITLES:
-                headings.append((offset, title, normalize_section(title)))
+            num = match.group("num")
+            own = normalize_section(title)
+            if num is not None:
+                parts = [int(p) for p in num.split(".")]
+                if not _looks_like_affiliation(title) and _continues_outline(parts, outline):
+                    outline = parts
+                    if len(parts) == 1:
+                        section_label = own
+                        label = own
+                    else:
+                        label = section_label if section_label not in (None, "other") else own
+                    headings.append((offset, title, label))
+            elif title.lower() in _BARE_TITLES and (not outline or title.lower() in _BACK_MATTER_TITLES):
+                headings.append((offset, title, own))
         offset += len(line) + 1
     return headings
 
@@ -148,9 +200,7 @@ def section_for_offset(offset: int, headings: list[tuple[int, str, str]]) -> str
     for h_offset, _, h_label in headings:
         if h_offset > offset:
             break
-        # Sub-headings that don't match any rule inherit their parent's label.
-        if h_label != "other" or h_offset == headings[0][0]:
-            label = h_label
+        label = h_label
     return label
 
 
