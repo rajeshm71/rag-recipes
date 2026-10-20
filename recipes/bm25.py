@@ -44,20 +44,31 @@ class BM25Index:
             raise ValueError("chunk_ids and texts must be the same length")
         self._chunk_ids = list(chunk_ids)
         tokenized = [_tokenize(t) for t in texts]
+        self._token_sets = [set(tokens) for tokens in tokenized]
         self._bm25 = BM25Okapi(tokenized)
 
     def search(self, query: str, k: int = 5) -> list[BM25Result]:
         """Top-k chunks by BM25 score, best first. Chunks sharing no term
-        with the query (score 0) are excluded, so a query with zero lexical
-        overlap returns fewer than k results, possibly none. Returning
-        arbitrary zero-score chunks instead would hand them full RRF /
-        reranker credit downstream in the hybrid and rerank patterns.
+        with the query are excluded, so a query with zero lexical overlap
+        returns fewer than k results, possibly none. Returning arbitrary
+        non-matching chunks instead would hand them full RRF / reranker
+        credit downstream in the hybrid and rerank patterns.
+
+        The test is term overlap, not a positive score: rank_bm25 gives a
+        term in half or more of the chunks an IDF of zero or below, so a
+        chunk that does match can score <= 0, most often in small corpora.
         """
         if self._bm25 is None:
             raise RuntimeError("BM25Index.build() must be called before search()")
-        scores = self._bm25.get_scores(_tokenize(query))
+        query_tokens = _tokenize(query)
+        query_set = set(query_tokens)
+        scores = self._bm25.get_scores(query_tokens)
         ranked = sorted(
-            ((cid, float(s)) for cid, s in zip(self._chunk_ids, scores) if s > 0),
+            (
+                (cid, float(s))
+                for cid, s, tokens in zip(self._chunk_ids, scores, self._token_sets)
+                if tokens & query_set
+            ),
             key=lambda pair: pair[1],
             reverse=True,
         )

@@ -39,3 +39,23 @@ def test_bm25_raises_before_build():
         assert False, "expected RuntimeError"
     except RuntimeError:
         pass
+
+
+def test_bm25_keeps_matches_whose_score_is_not_positive():
+    # Matching chunks can score <= 0 in rank_bm25. They still match the
+    # query and must be returned; only chunks sharing no term are excluded.
+    # A term in exactly half the chunks has an IDF of exactly 0.
+    half = BM25Index()
+    half.build(chunk_ids=["a", "b", "c", "d"], texts=["rag one", "rag two", "three", "four"])
+    results = half.search("rag", k=4)
+    assert {r.chunk_id for r in results} == {"a", "b"}
+    assert all(r.score == 0 for r in results)
+
+    # When the corpus-average IDF is negative, so is the floor rank_bm25
+    # substitutes for negative IDFs: every match scores below zero.
+    small = BM25Index()
+    small.build(chunk_ids=["a", "b"], texts=["rag retrieval", "rag reranking"])
+    results = small.search("rag", k=2)
+    assert {r.chunk_id for r in results} == {"a", "b"}
+    assert all(r.score < 0 for r in results)
+    assert small.search("zebra", k=2) == []
