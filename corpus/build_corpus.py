@@ -8,8 +8,12 @@ each PDF, extracts text, and chunks it per this project's fixed policy: 512
 tokens per chunk (tiktoken-counted), 64-token overlap, paragraph-boundary
 aware, at most 3 chunks kept per paper to avoid one-paper dominance.
 
-This script is shipped for transparency -- corpus.jsonl is committed
-pre-built and does NOT need to be regenerated on every install.
+The shipped corpus/corpus.jsonl is not built by this script: it is rebuilt
+from the committed full texts by corpus/build_from_fulltext.py (body text
+only, up to 20 chunks per paper), which reuses this module's chunk_text()
+and tokenizer. Running this script with its default --output overwrites
+corpus/corpus.jsonl with a 3-chunks-per-paper corpus; use --dry-run or
+another --output path to try it.
 
 If a paper's PDF fails to download or its text fails to extract, that paper
 is skipped with a logged warning; the script keeps going and reports at the

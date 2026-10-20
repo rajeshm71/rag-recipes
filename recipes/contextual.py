@@ -1,16 +1,12 @@
 """Pattern 07: Contextual retrieval (Anthropic). One-time indexing-cost
 preprocessing: before embedding, prepend a short LLM-generated context blurb
 to each chunk, situating it within its full source document. The blurb
-generation call uses claude-sonnet-5, not Haiku 4.5 -- Haiku 4.5 requires a
-4,096-token minimum cacheable prefix, but this pilot corpus's per-paper
-documents are only ~1,500 tokens (<=3 chunks x 512 tokens), so caching would
-silently never trigger under Haiku. claude-sonnet-5's 1,024-token minimum
-is far more likely to actually engage, making the cached-vs-uncached cost
-comparison genuinely meaningful. (Verified against
-platform.claude.com/docs/en/build-with-claude/prompt-caching, 2026-08-12.)
-The shared document text is sent as a cached system-prompt prefix, so
+generation call uses claude-sonnet-5, with the paper's full text sent as a
+cached system-prompt prefix. On this corpus a paper is roughly 4,500 to
+9,500 tokens, above the model's 1,024-token minimum cacheable prefix, so
 generating blurbs for every chunk of the same paper is cheap after the
-first. Retrieval and final-answer generation are unchanged from pattern 01
+first. A model with a higher minimum, or shorter documents, would silently
+skip caching and pay full price for every call. Retrieval and final-answer generation are unchanged from pattern 01
 (dense over the now-contextualized chunk text) -- this pattern's novelty is
 entirely in what gets embedded, not in the retrieval or generation mechanism.
 """
