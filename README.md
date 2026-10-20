@@ -70,11 +70,11 @@ fails if it drifts from what is committed.
 <!-- retrieval-leaderboard:start -->
 | rank | pattern | hit@3 | hit@10 | mrr | recall@10 | p50_ms |
 |---|---|---|---|---|---|---|
-| 1 | 03+04_hybrid_rerank | 0.909 [0.833, 0.970] | 0.970 [0.924, 1.000] | 0.805 [0.728, 0.877] | 0.947 [0.901, 0.985] | 1664.3 |
-| 2 | 04_bm25_rerank | 0.879 [0.788, 0.940] | 0.894 [0.818, 0.955] | 0.778 [0.687, 0.857] | 0.856 [0.780, 0.932] | 1658.4 |
-| 3 | 02_bm25 | 0.742 [0.636, 0.848] | 0.848 [0.758, 0.924] | 0.684 [0.579, 0.780] | 0.826 [0.735, 0.909] | 1.1 |
-| 4 | 03_hybrid_rrf | 0.727 [0.606, 0.833] | 0.955 [0.894, 1.000] | 0.614 [0.522, 0.708] | 0.932 [0.871, 0.985] | 12.3 |
-| 5 | 01_naive_dense | 0.652 [0.545, 0.773] | 0.894 [0.818, 0.955] | 0.553 [0.462, 0.645] | 0.856 [0.780, 0.932] | 10.3 |
+| 1 | 03+04_hybrid_rerank | 0.894 [0.818, 0.955] | 0.955 [0.894, 1.000] | 0.807 [0.726, 0.879] | 0.924 [0.864, 0.970] | 1641.1 |
+| 2 | 04_bm25_rerank | 0.864 [0.773, 0.939] | 0.894 [0.818, 0.955] | 0.785 [0.690, 0.867] | 0.856 [0.780, 0.932] | 1597.4 |
+| 3 | 02_bm25 | 0.727 [0.621, 0.833] | 0.848 [0.758, 0.924] | 0.673 [0.570, 0.769] | 0.826 [0.735, 0.909] | 1.5 |
+| 4 | 03_hybrid_rrf | 0.697 [0.576, 0.803] | 0.955 [0.894, 1.000] | 0.605 [0.515, 0.699] | 0.924 [0.864, 0.977] | 13.0 |
+| 5 | 01_naive_dense | 0.652 [0.530, 0.773] | 0.894 [0.818, 0.955] | 0.554 [0.459, 0.651] | 0.848 [0.773, 0.917] | 12.2 |
 <!-- retrieval-leaderboard:end -->
 
 Columns: hit@k is whether any relevant chunk is in the top k; MRR is the reciprocal rank of the
@@ -122,7 +122,7 @@ jupyter lab notebooks/
 
 ## How the eval works
 
-- **Corpus:** [`corpus/corpus.jsonl`](corpus/corpus.jsonl) -- 334 chunks from 18 arXiv papers
+- **Corpus:** [`corpus/corpus.jsonl`](corpus/corpus.jsonl) -- 333 chunks from 18 arXiv papers
   (`cs.CL`/`cs.LG`/`cs.AI`), 11 to 20 chunks per paper. Body text only (everything before the
   references), 512-token chunks with a 64-token overlap on paragraph boundaries, and a `section`
   label derived from each paper's own headings. Built by

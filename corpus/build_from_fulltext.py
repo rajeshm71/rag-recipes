@@ -12,6 +12,7 @@ Inputs, both committed:
 
 Policy:
 - Body text only: everything from the "References" heading onward is dropped.
+- Words split across a line end by PDF extraction are rejoined (dehyphenate()).
 - 512-token chunks on paragraph boundaries, each starting with the last 64
   tokens of the chunk before it (chunk_text() in corpus/build_corpus.py).
 - `section` is derived from the paper's own headings ("1 Introduction",
@@ -247,6 +248,43 @@ def _collapse_whitespace(text: str) -> tuple[str, list[int]]:
     return "".join(chars), offsets
 
 
+# A word split across a line end: "strug-" then "gle" on the next line.
+_LINE_BREAK_HYPHEN_RE = re.compile(r"([A-Za-z]+)-[ \t]*\n[ \t]*([A-Za-z]+)")
+_WORD_RE = re.compile(r"[A-Za-z]+")
+
+
+def line_break_vocabulary(texts: list[str]) -> set[str]:
+    """Lowercased words that appear unbroken in `texts`. Split occurrences
+    are removed first, so their fragments ("strug", "gle") do not count."""
+    return {
+        word.lower()
+        for text in texts
+        for word in _WORD_RE.findall(_LINE_BREAK_HYPHEN_RE.sub(" ", text))
+    }
+
+
+def dehyphenate(text: str, vocabulary: set[str]) -> str:
+    """Rejoin words that PDF extraction split across a line end.
+
+    "strug-\\ngle" becomes "struggle" when the joined word appears unbroken
+    elsewhere in `vocabulary`, or when neither half is a word on its own
+    ("orienta" + "tions"). Otherwise the hyphen is real ("self-\\nsupervised")
+    and only the line break goes. A capitalized continuation ("Hu-\\nBERT",
+    a name, an acronym) also keeps its hyphen.
+    """
+
+    def rejoin(match: re.Match) -> str:
+        head, tail = match.group(1), match.group(2)
+        joined = (head + tail).lower()
+        if tail[0].islower() and (
+            joined in vocabulary or (head.lower() not in vocabulary and tail.lower() not in vocabulary)
+        ):
+            return head + tail
+        return f"{head}-{tail}"
+
+    return _LINE_BREAK_HYPHEN_RE.sub(rejoin, text)
+
+
 def build(
     fulltext_path: Path = CORPUS_DIR / "corpus_fulltext.jsonl",
     papers_path: Path = CORPUS_DIR / "papers.jsonl",
@@ -264,9 +302,11 @@ def build(
     all_chunks: list[dict] = []
     with open(fulltext_path, encoding="utf-8") as f:
         texts = [json.loads(line) for line in f if line.strip()]
+    vocabulary = line_break_vocabulary([r["full_text"] for r in texts])
     for record in sorted(texts, key=lambda r: r["paper_id"]):
         paper = papers[record["paper_id"]]
-        for i, chunk in enumerate(chunk_paper(record["full_text"], tokenizer, max_chunks_per_paper)):
+        full_text = dehyphenate(record["full_text"], vocabulary)
+        for i, chunk in enumerate(chunk_paper(full_text, tokenizer, max_chunks_per_paper)):
             all_chunks.append(
                 {
                     "chunk_id": f"{paper['paper_id']}#{i}",

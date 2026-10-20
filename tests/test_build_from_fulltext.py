@@ -9,7 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "corpus"))
 from build_from_fulltext import (
     body_text,
     chunk_paper,
+    dehyphenate,
     find_headings,
+    line_break_vocabulary,
     normalize_section,
     section_for_offset,
 )
@@ -177,3 +179,22 @@ def test_outline_tolerates_one_missed_heading_but_not_a_jump():
 def test_normalize_section_ignores_spaces_lost_or_added_by_pdf_extraction():
     assert normalize_section("RELATEDWORKS") == "related_work"
     assert normalize_section("The Hybrid Agentic F ramework") == "methods"
+
+
+def test_dehyphenate_rejoins_words_split_at_a_line_end():
+    text = (
+        "Candidates help.\nWe score can-\ndidates and orienta-\ntions, using self-\nsupervised "
+        "Hu-\nBERT features and a self supervised loss."
+    )
+    vocabulary = line_break_vocabulary([text])
+    # Fragments of split words do not count as words.
+    assert "didates" not in vocabulary
+    assert dehyphenate(text, vocabulary) == (
+        "Candidates help.\nWe score candidates and orientations, using self-supervised "
+        "Hu-BERT features and a self supervised loss."
+    )
+
+
+def test_dehyphenate_leaves_paragraph_breaks_and_plain_hyphens_alone():
+    text = "A trade-off.\n\nNext para-\n\ngraph starts here."
+    assert dehyphenate(text, line_break_vocabulary([text])) == text
