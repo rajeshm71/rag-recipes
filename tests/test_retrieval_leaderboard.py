@@ -8,9 +8,14 @@ import time
 import pytest
 
 from evals.retrieval_leaderboard import (
+    README_BLOCKS,
+    README_CATEGORY_END,
+    README_CATEGORY_START,
     README_END,
     README_START,
     build_retrievers,
+    category_table,
+    category_table_only,
     readme_table,
     render,
     run,
@@ -51,7 +56,7 @@ def test_render_and_strip_latency():
     retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
     rows = [score(name, fn, QA) for name, fn in retrievers.items()]
     md = render(rows, len(QA), len(CORPUS), "mock", "mock")
-    assert md.count("\n| ") == 1 + len(rows)  # header + one line per row
+    assert table_only(md).count("\n| ") == len(rows)  # one line per row after the header
     assert "p50_ms" in md
     stripped = strip_latency(md)
     assert "p50_ms" not in stripped
@@ -153,7 +158,7 @@ def test_render_shows_mrr_vs_top_with_ties_marked():
     retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
     rows = [score(name, fn, QA) for name, fn in retrievers.items()]
     md = render(rows, len(QA), len(CORPUS), "mock", "mock")
-    body = [line for line in md.splitlines() if line.startswith("| ") and not line.startswith("| rank")]
+    body = [line for line in table_only(md).splitlines() if line.startswith("| ") and not line.startswith("| rank")]
 
     assert "mrr_vs_top" in md
     assert body[0].split(" | ")[6] == "--"
@@ -164,3 +169,83 @@ def test_render_shows_mrr_vs_top_with_ties_marked():
         assert cell.endswith("(tie)")
     # The comparable part still drops only the latency column.
     assert "mrr_vs_top" in strip_latency(md) and "p50_ms" not in strip_latency(md)
+
+
+QA_WITH_CATEGORIES = [
+    {"qid": "q1", "category": "keyword", "question": "speculative decoding inference", "relevant_chunk_ids": ["c1"]},
+    {"qid": "q2", "category": "keyword", "question": "gradient descent weights", "relevant_chunk_ids": ["c4"]},
+    {"qid": "q3", "category": "paraphrase", "question": "pictures sorted by machines", "relevant_chunk_ids": ["c2"]},
+]
+
+
+def test_category_table_groups_questions_by_category():
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
+    row = score("02_bm25", retrievers["02_bm25"], QA_WITH_CATEGORIES)
+
+    lines = category_table([row])
+
+    # Known categories come first, in the fixed order, with their question counts.
+    assert lines[0] == "| pattern | keyword (2) | paraphrase (1) |"
+    # BM25 ranks both keyword targets first; the paraphrase shares no term with its target.
+    assert lines[2] == "| 02_bm25 | 1.000 / 1.000 | 0.000 / 0.000 |"
+
+
+def test_rendered_leaderboard_has_both_tables_and_keeps_the_category_table_comparable():
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
+    rows = [score(name, fn, QA_WITH_CATEGORIES) for name, fn in retrievers.items()]
+    md = render(rows, len(QA_WITH_CATEGORIES), len(CORPUS), "mock", "mock")
+
+    assert "## By question category" in md
+    assert table_only(md).startswith("| rank |")
+    assert category_table_only(md).startswith("| pattern | keyword (2) | paraphrase (1) |")
+    # Only the main table loses its latency column; the category table's last
+    # column (a category) must survive the comparison.
+    stripped = strip_latency(md)
+    assert "p50_ms" not in stripped
+    assert category_table_only(md) in stripped
+
+
+def test_readme_round_trip_for_both_tables(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        f"intro\n{README_START}\nold main\n{README_END}\nmiddle\n"
+        f"{README_CATEGORY_START}\nold categories\n{README_CATEGORY_END}\noutro\n",
+        encoding="utf-8",
+    )
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
+    rows = [score(name, fn, QA_WITH_CATEGORIES) for name, fn in retrievers.items()]
+    md = render(rows, len(QA_WITH_CATEGORIES), len(CORPUS), "mock", "mock")
+
+    for start, end, fresh in README_BLOCKS:
+        write_readme_table(readme, fresh(md), start, end)
+
+    text = readme.read_text(encoding="utf-8")
+    assert "old main" not in text and "old categories" not in text
+    assert "\nmiddle\n" in text and text.endswith("outro\n")
+    assert readme_table(text) == table_only(md)
+    assert readme_table(text, README_CATEGORY_START, README_CATEGORY_END) == category_table_only(md)
+
+
+def test_category_mrr_weighted_by_question_count_equals_the_main_mrr():
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
+    rows = [score(name, fn, QA_WITH_CATEGORIES) for name, fn in retrievers.items()]
+    header, _, *body = category_table(rows)
+
+    def cells(line):
+        return [cell.strip() for cell in line.strip("|").split("|")][1:]
+
+    counts = [int(h.rsplit("(", 1)[1].rstrip(")")) for h in cells(header)]
+    for row, line in zip(rows, body):
+        mrrs = [float(cell.split(" / ")[0]) for cell in cells(line)]
+        weighted = sum(m * n for m, n in zip(mrrs, counts)) / sum(counts)
+        assert weighted == pytest.approx(row.mrr.mean, abs=1e-3)
+
+
+def test_category_table_shows_a_dash_for_a_row_without_that_category():
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
+    full = score("02_bm25", retrievers["02_bm25"], QA_WITH_CATEGORIES)
+    partial = score("01_naive_dense", retrievers["01_naive_dense"], QA_WITH_CATEGORIES[:2])
+
+    lines = category_table([full, partial])
+
+    assert lines[3] == "| 01_naive_dense | " + lines[3].split(" | ")[1] + " | -- |"

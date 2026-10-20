@@ -2,14 +2,17 @@
 scored on the eval set with local models. No API key, no network beyond
 the one-time model download, reproducible on any machine:
 
-    uv run python evals/retrieval_leaderboard.py            # write outputs/retrieval_leaderboard.md + README table
-    uv run python evals/retrieval_leaderboard.py --check    # fail if either committed table differs
+    uv run python evals/retrieval_leaderboard.py            # write outputs/retrieval_leaderboard.md + README tables
+    uv run python evals/retrieval_leaderboard.py --check    # fail if the output file or a README table differs
     uv run python evals/retrieval_leaderboard.py --per-question out.jsonl   # also dump per-question ranks
 
 Rows: naive dense, BM25, hybrid (RRF), BM25 + cross-encoder rerank, and
 hybrid + rerank. Metrics: hit@3, hit@10, MRR, recall@10 (fraction of a
 question's relevant chunks in the top 10), each with a 95% bootstrap CI,
-plus p50 latency. Latency depends on hardware and is excluded from --check.
+plus each row's paired MRR difference from the top row and p50 latency.
+A second table breaks MRR and hit@10 down by question category. Both
+tables are written to the output file and to their own marker blocks in
+the README. Latency depends on hardware and is excluded from --check.
 
 Models: BAAI/bge-small-en-v1.5 embeddings (local, 33M parameters) and
 BAAI/bge-reranker-v2-m3 (local). RAG_RECIPES_LLM=mock swaps both for the
@@ -52,6 +55,10 @@ DEFAULT_OUTPUT = ROOT / "outputs" / "retrieval_leaderboard.md"
 README = ROOT / "README.md"
 README_START = "<!-- retrieval-leaderboard:start -->"
 README_END = "<!-- retrieval-leaderboard:end -->"
+README_CATEGORY_START = "<!-- retrieval-by-category:start -->"
+README_CATEGORY_END = "<!-- retrieval-by-category:end -->"
+# Column order of the per-category table; categories not listed follow, sorted.
+CATEGORY_ORDER = ("keyword", "paraphrase", "multi_hop", "filter")
 
 Retriever = Callable[[str, int], list[str]]
 
@@ -224,42 +231,116 @@ def render(rows: list[Row], n_questions: int, n_chunks: int, embedding_model: st
             f"| {i} | {r.name} | {_ci(r.hit_at_3)} | {_ci(r.hit_at_10)} | {_ci(r.mrr)} | "
             f"{_ci(r.recall_at_10)} | {_vs_top(r, top)} | {r.p50_latency_ms:.1f} |"
         )
+    lines += [
+        "",
+        "## By question category",
+        "",
+        "MRR / hit@10 for each question category; the header gives the number of questions.",
+        "",
+        *category_table(ranked),
+    ]
     return "\n".join(lines) + "\n"
 
 
-def strip_latency(markdown: str) -> str:
-    """The comparable part of a rendered table: every column except p50_ms."""
-    out = []
+def category_table(ranked: list[Row]) -> list[str]:
+    """Markdown lines of a per-category table: one row per pattern in the
+    given order, one column per question category, cells "MRR / hit@10"
+    from each row's per-question first relevant rank."""
+    def category(q: dict) -> str:
+        return q.get("category") or "uncategorized"
+
+    seen = {category(q) for r in ranked for q in r.per_question}
+    categories = [c for c in CATEGORY_ORDER if c in seen] + sorted(seen - set(CATEGORY_ORDER))
+    first = ranked[0].per_question if ranked else []
+    counts = {c: sum(1 for q in first if category(q) == c) for c in categories}
+    lines = [
+        "| pattern | " + " | ".join(f"{c} ({counts[c]})" for c in categories) + " |",
+        "|---|" + "---|" * len(categories),
+    ]
+    for r in ranked:
+        cells = []
+        for c in categories:
+            ranks = [q["first_relevant_rank"] for q in r.per_question if category(q) == c]
+            if not ranks:
+                cells.append("--")
+                continue
+            mean_rr = sum(1.0 / rank for rank in ranks if rank) / len(ranks)
+            hit_10 = sum(1 for rank in ranks if rank and rank <= 10) / len(ranks)
+            cells.append(f"{mean_rr:.3f} / {hit_10:.3f}")
+        lines.append(f"| {r.name} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def _tables(markdown: str) -> list[list[str]]:
+    """The markdown tables in `markdown`, each a list of its `|` lines."""
+    tables: list[list[str]] = []
+    previous_was_table = False
     for line in markdown.splitlines():
-        if line.startswith("|"):
-            cells = line.split("|")
-            line = "|".join(cells[:-2]) + "|"
+        is_table = line.startswith("|")
+        if is_table and not previous_was_table:
+            tables.append([])
+        if is_table:
+            tables[-1].append(line)
+        previous_was_table = is_table
+    return tables
+
+
+def strip_latency(markdown: str) -> str:
+    """The comparable part of a rendered leaderboard: everything except the
+    p50_ms column, which depends on hardware. Only tables whose header has a
+    p50_ms column lose their last column."""
+    out = []
+    previous_was_table = False
+    strip = False
+    for line in markdown.splitlines():
+        is_table = line.startswith("|")
+        if is_table and not previous_was_table:
+            strip = "p50_ms" in line
+        if is_table and strip:
+            line = "|".join(line.split("|")[:-2]) + "|"
         out.append(line)
+        previous_was_table = is_table
     return "\n".join(out)
 
 
 def table_only(markdown: str) -> str:
-    """Just the markdown table rows (header + body) of a rendered leaderboard."""
-    return "\n".join(line for line in markdown.splitlines() if line.startswith("|"))
+    """The main leaderboard table (header + body) of a rendered leaderboard."""
+    tables = _tables(markdown)
+    return "\n".join(tables[0]) if tables else ""
 
 
-def readme_table(readme_text: str) -> str | None:
+def category_table_only(markdown: str) -> str:
+    """The per-category table of a rendered leaderboard."""
+    tables = _tables(markdown)
+    return "\n".join(tables[1]) if len(tables) > 1 else ""
+
+
+def readme_table(readme_text: str, start_marker: str = README_START, end_marker: str = README_END) -> str | None:
     """The table currently embedded in the README between the markers, or
     None if the markers are absent."""
-    if README_START not in readme_text or README_END not in readme_text:
+    if start_marker not in readme_text or end_marker not in readme_text:
         return None
-    start = readme_text.index(README_START) + len(README_START)
-    end = readme_text.index(README_END)
+    start = readme_text.index(start_marker) + len(start_marker)
+    end = readme_text.index(end_marker)
     return readme_text[start:end].strip()
 
 
-def write_readme_table(readme_path: Path, table: str) -> None:
+def write_readme_table(
+    readme_path: Path, table: str, start_marker: str = README_START, end_marker: str = README_END
+) -> None:
     text = readme_path.read_text(encoding="utf-8")
-    if README_START not in text or README_END not in text:
+    if start_marker not in text or end_marker not in text:
         return
-    start = text.index(README_START) + len(README_START)
-    end = text.index(README_END)
+    start = text.index(start_marker) + len(start_marker)
+    end = text.index(end_marker)
     readme_path.write_text(text[:start] + "\n" + table + "\n" + text[end:], encoding="utf-8")
+
+
+# README marker pairs and the table each one holds.
+README_BLOCKS = (
+    (README_START, README_END, table_only),
+    (README_CATEGORY_START, README_CATEGORY_END, category_table_only),
+)
 
 
 def run(
@@ -307,18 +388,21 @@ def main() -> None:
         if strip_latency(committed) != strip_latency(markdown):
             print(f"MISMATCH: {args.output} differs from a fresh run (latency column ignored).", file=sys.stderr)
             sys.exit(1)
-        embedded = readme_table(README.read_text(encoding="utf-8")) if README.exists() else None
-        if embedded is not None and strip_latency(embedded) != strip_latency(table_only(markdown)):
-            print(f"MISMATCH: the table in {README} differs from a fresh run.", file=sys.stderr)
-            sys.exit(1)
-        print(f"OK: {args.output} and the README table match a fresh run.")
+        readme_text = README.read_text(encoding="utf-8") if README.exists() else ""
+        for start, end, fresh in README_BLOCKS:
+            embedded = readme_table(readme_text, start, end)
+            if embedded is not None and strip_latency(embedded) != strip_latency(fresh(markdown)):
+                print(f"MISMATCH: the table between {start} and {end} in {README} differs.", file=sys.stderr)
+                sys.exit(1)
+        print(f"OK: {args.output} and the README tables match a fresh run.")
         return
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(markdown, encoding="utf-8")
     print(f"wrote {args.output}")
     if README.exists():
-        write_readme_table(README, table_only(markdown))
-        print(f"updated the table in {README}")
+        for start, end, fresh in README_BLOCKS:
+            write_readme_table(README, fresh(markdown), start, end)
+        print(f"updated the tables in {README}")
 
 
 if __name__ == "__main__":
