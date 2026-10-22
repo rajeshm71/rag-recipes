@@ -249,3 +249,37 @@ def test_category_table_shows_a_dash_for_a_row_without_that_category():
     lines = category_table([full, partial])
 
     assert lines[3] == "| 01_naive_dense | " + lines[3].split(" | ")[1] + " | -- |"
+
+
+def test_score_uses_evidence_groups_for_recall():
+    # c2 and c4 are two copies of the same evidence: finding either is full recall.
+    qa = [{"qid": "q1", "question": "image classification with convolutional networks",
+           "relevant_chunk_ids": ["c2", "c4"], "evidence": [["c2", "c4"]]}]
+    retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
+
+    row = score("02_bm25", retrievers["02_bm25"], qa)
+
+    assert row.recall_at_10.mean == 1.0
+
+
+def test_candidate_pool_lists_every_chunk_any_row_found(tmp_path):
+    corpus_path = tmp_path / "corpus.jsonl"
+    qa_path = tmp_path / "qa.jsonl"
+    pool_path = tmp_path / "pool.jsonl"
+    corpus = {cid: {**c, "paper_id": f"p{cid}", "section": "methods"} for cid, c in CORPUS.items()}
+    corpus_path.write_text("\n".join(json.dumps(c) for c in corpus.values()) + "\n", encoding="utf-8")
+    qa_path.write_text("\n".join(json.dumps(q) for q in QA) + "\n", encoding="utf-8")
+
+    run(corpus_path, qa_path, embedder=MockEmbedder(), reranker=MockReranker(), pool_path=pool_path)
+
+    pool = [json.loads(line) for line in pool_path.read_text(encoding="utf-8").splitlines()]
+    assert [entry["qid"] for entry in pool] == ["q1", "q2"]
+    entry = pool[1]
+    # Dense retrieval returns every chunk, so all four are candidates.
+    assert {c["chunk_id"] for c in entry["candidates"]} == set(CORPUS)
+    labelled = {c["chunk_id"] for c in entry["candidates"] if c["labelled"]}
+    assert labelled == {"c2", "c4"}
+    for c in entry["candidates"]:
+        assert c["best_rank"] == min(c["found_by"].values())
+        assert c["text"] == CORPUS[c["chunk_id"]]["text"]
+    assert [c["best_rank"] for c in entry["candidates"]] == sorted(c["best_rank"] for c in entry["candidates"])

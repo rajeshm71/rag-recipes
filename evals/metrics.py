@@ -37,14 +37,25 @@ def mrr(retrieved_ids: list[str], relevant_ids: list[str]) -> float:
     return 0.0
 
 
-def recall_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
-    """Fraction of relevant_ids that appear in the top-k retrieved_ids. Unlike
-    hit@k, a multi-chunk question only scores 1.0 when every relevant chunk
-    was retrieved."""
-    relevant = set(relevant_ids)
-    if not relevant:
+def recall_at_k(
+    retrieved_ids: list[str],
+    relevant_ids: list[str],
+    k: int,
+    evidence: list[list[str]] | None = None,
+) -> float:
+    """Fraction of a question's evidence found in the top-k retrieved_ids.
+
+    With `evidence` (one list per piece of evidence, each holding every chunk
+    that supplies that piece), a piece counts as found when any one of its
+    chunks is in the top k, so copies of the same passage are not all
+    required. Without it, every relevant chunk is its own piece. Unlike
+    hit@k, a multi-piece question only scores 1.0 when every piece was found.
+    """
+    groups = [set(group) for group in evidence if group] if evidence else [{cid} for cid in set(relevant_ids)]
+    if not groups:
         return 0.0
-    return len(set(retrieved_ids[:k]) & relevant) / len(relevant)
+    top_k = set(retrieved_ids[:k])
+    return sum(1 for group in groups if group & top_k) / len(groups)
 
 
 def paper_hit_at_k(

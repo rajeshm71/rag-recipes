@@ -142,3 +142,16 @@ def test_paired_difference_ci_uses_per_question_differences():
 def test_paired_difference_ci_requires_the_same_questions():
     with pytest.raises(ValueError):
         paired_difference_ci([1.0, 0.0], [1.0])
+
+
+def test_recall_counts_an_evidence_piece_found_by_any_one_of_its_chunks():
+    # Two pieces of evidence; the first appears in two near-identical chunks.
+    evidence = [["a#1", "a#2"], ["b#4"]]
+    relevant = ["a#1", "a#2", "b#4"]
+    # Finding one copy of the first piece is enough for that piece.
+    assert recall_at_k(["a#2", "x", "y"], relevant, 10, evidence) == 0.5
+    assert recall_at_k(["a#2", "b#4"], relevant, 10, evidence) == 1.0
+    # Without evidence groups every chunk is its own piece, as before.
+    assert recall_at_k(["a#2", "b#4"], relevant, 10) == pytest.approx(2 / 3)
+    # Pieces outside the top k do not count.
+    assert recall_at_k(["x", "a#1", "b#4"], relevant, 2, evidence) == 0.5

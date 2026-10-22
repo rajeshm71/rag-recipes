@@ -5,10 +5,12 @@ the one-time model download, reproducible on any machine:
     uv run python evals/retrieval_leaderboard.py            # write outputs/retrieval_leaderboard.md + README tables
     uv run python evals/retrieval_leaderboard.py --check    # fail if the output file or a README table differs
     uv run python evals/retrieval_leaderboard.py --per-question out.jsonl   # also dump per-question ranks
+    uv run python evals/retrieval_leaderboard.py --pool pool.jsonl          # also dump each question's candidate chunks
 
 Rows: naive dense, BM25, hybrid (RRF), BM25 + cross-encoder rerank, and
 hybrid + rerank. Metrics: hit@3, hit@10, MRR, recall@10 (fraction of a
-question's relevant chunks in the top 10), each with a 95% bootstrap CI,
+question's evidence found in the top 10; see evals.metrics.recall_at_k),
+each with a 95% bootstrap CI,
 plus each row's paired MRR difference from the top row and p50 latency.
 A second table breaks MRR and hit@10 down by question category. Both
 tables are written to the output file and to their own marker blocks in
@@ -170,7 +172,7 @@ def score(
         h3.append(hit_at_k(ids, relevant, 3))
         h10.append(hit_at_k(ids, relevant, 10))
         rr.append(mrr(ids, relevant))
-        rec.append(recall_at_k(ids, relevant, 10))
+        rec.append(recall_at_k(ids, relevant, 10, record.get("evidence")))
         first_rank = next((i for i, cid in enumerate(ids, start=1) if cid in set(relevant)), None)
         per_question.append(
             {
@@ -348,6 +350,7 @@ def run(
     qa_path: Path = ROOT / "evals" / "qa_set.jsonl",
     embedder: Embedder | None = None,
     reranker: Reranker | None = None,
+    pool_path: Path | None = None,
 ) -> tuple[str, list[Row]]:
     mock = os.environ.get("RAG_RECIPES_LLM", "openai").lower() == "mock"
     if embedder is None:
@@ -364,7 +367,54 @@ def run(
     rows = [
         score(name, fn, qa_set, extra_latency_ms=pair_cache.take_reused_ms) for name, fn in retrievers.items()
     ]
+    if pool_path is not None:
+        write_pool(pool_path, candidate_pool(retrievers, qa_set, corpus_by_id))
     return render(rows, len(qa_set), len(corpus_by_id), embedding_model, reranker_model), rows
+
+
+def candidate_pool(
+    retrievers: dict[str, Retriever], qa_set: list[dict], corpus_by_id: dict[str, dict], k: int = CANDIDATES
+) -> list[dict]:
+    """Per question, every chunk any row ranks in its top k, for judging
+    which chunks support the answer. Each candidate records its rank in every
+    row that found it; candidates are ordered by their best rank."""
+    pool = []
+    for record in qa_set:
+        ranks: dict[str, dict[str, int]] = {}
+        for name, retrieve in retrievers.items():
+            for rank, cid in enumerate(retrieve(record["question"], k), start=1):
+                ranks.setdefault(cid, {})[name] = rank
+        labelled = set(record["relevant_chunk_ids"])
+        candidates = [
+            {
+                "chunk_id": cid,
+                "paper_id": corpus_by_id[cid]["paper_id"],
+                "section": corpus_by_id[cid].get("section"),
+                "best_rank": min(found_by.values()),
+                "found_by": found_by,
+                "labelled": cid in labelled,
+                "text": corpus_by_id[cid]["text"],
+            }
+            for cid, found_by in ranks.items()
+        ]
+        candidates.sort(key=lambda c: (c["best_rank"], c["chunk_id"]))
+        pool.append(
+            {
+                "qid": record.get("qid"),
+                "category": record.get("category"),
+                "question": record["question"],
+                "reference_answer": record.get("reference_answer"),
+                "relevant_chunk_ids": record["relevant_chunk_ids"],
+                "evidence": record.get("evidence"),
+                "candidates": candidates,
+            }
+        )
+    return pool
+
+
+def write_pool(path: Path, pool: list[dict]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(json.dumps(entry, ensure_ascii=False) + "\n" for entry in pool)
 
 
 def main() -> None:
@@ -374,9 +424,17 @@ def main() -> None:
         "--check", action="store_true", help="compare against the committed table instead of writing it"
     )
     parser.add_argument("--per-question", type=Path, default=None, help="also write per-question ranks (JSONL)")
+    parser.add_argument(
+        "--pool",
+        type=Path,
+        default=None,
+        help="also write every chunk any row ranks in its top 20, per question, for relevance judging (JSONL)",
+    )
     args = parser.parse_args()
 
-    markdown, rows = run()
+    markdown, rows = run(pool_path=args.pool)
+    if args.pool is not None:
+        print(f"wrote {args.pool}")
     print(markdown)
     if args.per_question is not None:
         with open(args.per_question, "w", encoding="utf-8") as f:

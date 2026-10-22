@@ -78,8 +78,9 @@ fails if it drifts from what is committed.
 <!-- retrieval-leaderboard:end -->
 
 Columns: hit@k is whether any relevant chunk is in the top k; MRR is the reciprocal rank of the
-first relevant chunk; recall@10 is the fraction of a question's relevant chunks in the top 10, which
-is what separates patterns on the multi-hop questions. Brackets are 95% bootstrap confidence
+first relevant chunk; recall@10 is the fraction of the pieces of evidence a question needs that appear
+in the top 10 (a piece counts as found once any chunk holding it is retrieved), which is what
+separates patterns on the multi-hop questions. Brackets are 95% bootstrap confidence
 intervals. mrr_vs_top is each pattern's MRR minus the top pattern's, with an interval bootstrapped
 over the per-question differences; "(tie)" means the eval set cannot tell the two apart. Latency is
 per query on the machine that produced the table. Reproduce it with:
@@ -148,7 +149,9 @@ jupyter lab notebooks/
   keyword, 24 paraphrase, 9 multi-hop (two chunks required, mostly across two papers), and 9
   filter-dependent (a category constraint is needed to disambiguate). Most target a body chunk
   whose answer is not in the paper's abstract, so a pattern has to find the right chunk, not just
-  the right paper.
+  the right paper. A question can list its `evidence`: one group of chunk ids per piece of evidence
+  the answer needs, each group holding every chunk that supplies that piece; `relevant_chunk_ids` is
+  the union of the groups.
 - **Metrics:** hit@3, hit@10, MRR, recall@10 (deterministic), faithfulness/answer
   relevance/citation accuracy (LLM-as-judge), p50/p95 latency, $/query (generation cost only), eval
   cost (generation plus judges) -- every quality metric reported with a 95% bootstrap confidence
