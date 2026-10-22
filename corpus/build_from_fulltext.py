@@ -7,8 +7,9 @@ Requires the `corpus-build` optional dependency group (tiktoken):
 Inputs, both committed:
 - corpus/corpus_fulltext.jsonl: {"paper_id", "full_text"} per paper, produced
   once by corpus/build_fulltext.py.
-- corpus/papers.jsonl: {"paper_id", "title", "authors", "year", "category"}
-  per paper, the arXiv metadata fetched by corpus/build_corpus.py.
+- corpus/papers.jsonl: {"paper_id", "title", "authors", "year", "category",
+  "categories"} per paper: arXiv metadata, `category` the primary listing and
+  `categories` every listing (refreshed with --refresh-categories).
 
 Policy:
 - Body text only: everything from the "References" heading onward is dropped.
@@ -37,6 +38,7 @@ from build_corpus import (
     CHUNK_TOKENS,
     _get_tokenizer,
     chunk_text,
+    fetch_arxiv_categories,
 )
 
 CORPUS_DIR = Path(__file__).resolve().parent
@@ -315,6 +317,7 @@ def build(
                     "authors": paper["authors"],
                     "year": paper["year"],
                     "category": paper["category"],
+                    "categories": paper.get("categories", [paper["category"]]),
                     "section": chunk["section"],
                     "chunk_index": i,
                     "text": chunk["text"],
@@ -328,7 +331,32 @@ def build(
     return all_chunks
 
 
+def refresh_paper_categories(papers_path: Path = CORPUS_DIR / "papers.jsonl", fetch=fetch_arxiv_categories) -> None:
+    """Set each paper's `categories` to every arXiv category it is listed in
+    (primary first) and `category` to the primary one. One network request."""
+    with open(papers_path, encoding="utf-8") as f:
+        papers = [json.loads(line) for line in f if line.strip()]
+    found = fetch([p["paper_id"] for p in papers])
+    with open(papers_path, "w", encoding="utf-8", newline="\n") as f:
+        for paper in papers:
+            categories = found[paper["paper_id"]]
+            paper["category"] = categories[0]
+            paper["categories"] = categories
+            f.write(json.dumps(paper, ensure_ascii=False) + "\n")
+
+
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--refresh-categories",
+        action="store_true",
+        help="fetch every paper's arXiv categories into corpus/papers.jsonl first (one network request)",
+    )
+    args = parser.parse_args()
+    if args.refresh_categories:
+        refresh_paper_categories()
     chunks = build()
     by_paper: dict[str, int] = {}
     by_section: dict[str, int] = {}

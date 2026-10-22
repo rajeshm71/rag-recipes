@@ -129,6 +129,34 @@ def search_arxiv(
     return papers
 
 
+def parse_arxiv_categories(atom_xml: str) -> dict[str, list[str]]:
+    """paper_id ("arxiv:2601.00086") -> every arXiv category the paper is
+    listed in, primary first, from an arXiv API Atom response."""
+    root = ET.fromstring(atom_xml)
+    found: dict[str, list[str]] = {}
+    for entry in root.findall("atom:entry", ATOM_NS):
+        arxiv_id = re.sub(r"v\d+$", "", entry.find("atom:id", ATOM_NS).text.rsplit("/", 1)[-1])
+        primary = entry.find("arxiv:primary_category", ATOM_NS).get("term")
+        listed = [c.get("term") for c in entry.findall("atom:category", ATOM_NS)]
+        found[f"arxiv:{arxiv_id}"] = list(dict.fromkeys([primary, *listed]))
+    return found
+
+
+def fetch_arxiv_categories(paper_ids: list[str]) -> dict[str, list[str]]:
+    """Every arXiv category for each paper, in one API request."""
+    import requests
+
+    ids = [pid.removeprefix("arxiv:") for pid in paper_ids]
+    query = urllib.parse.urlencode({"id_list": ",".join(ids), "max_results": len(ids)})
+    resp = requests.get(f"{ARXIV_API}?{query}", timeout=30)
+    resp.raise_for_status()
+    found = parse_arxiv_categories(resp.text)
+    missing = sorted(set(paper_ids) - set(found))
+    if missing:
+        raise ValueError(f"arXiv returned no entry for: {', '.join(missing)}")
+    return found
+
+
 def download_pdf_text(pdf_url: str) -> str:
     import io
 

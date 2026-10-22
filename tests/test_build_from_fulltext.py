@@ -6,13 +6,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "corpus"))
 
+import json
+
+import build_from_fulltext
 from build_from_fulltext import (
     body_text,
+    build,
     chunk_paper,
     dehyphenate,
     find_headings,
     line_break_vocabulary,
     normalize_section,
+    refresh_paper_categories,
     section_for_offset,
 )
 
@@ -198,3 +203,37 @@ def test_dehyphenate_rejoins_words_split_at_a_line_end():
 def test_dehyphenate_leaves_paragraph_breaks_and_plain_hyphens_alone():
     text = "A trade-off.\n\nNext para-\n\ngraph starts here."
     assert dehyphenate(text, line_break_vocabulary([text])) == text
+
+
+def test_refresh_paper_categories_sets_primary_and_every_listing(tmp_path):
+    papers = tmp_path / "papers.jsonl"
+    papers.write_text(
+        json.dumps({"paper_id": "arxiv:1", "title": "T", "authors": ["A"], "year": 2025, "category": "cs.LG"}) + "\n",
+        encoding="utf-8",
+    )
+
+    refresh_paper_categories(papers, fetch=lambda ids: {"arxiv:1": ["cs.RO", "cs.LG"]})
+
+    record = json.loads(papers.read_text(encoding="utf-8"))
+    assert record["category"] == "cs.RO"
+    assert record["categories"] == ["cs.RO", "cs.LG"]
+
+
+def test_build_copies_every_category_into_each_chunk(tmp_path, monkeypatch):
+    monkeypatch.setattr(build_from_fulltext, "_get_tokenizer", lambda: _FakeTokenizer())
+    papers = tmp_path / "papers.jsonl"
+    fulltext = tmp_path / "fulltext.jsonl"
+    out = tmp_path / "corpus.jsonl"
+    papers.write_text(
+        json.dumps(
+            {"paper_id": "arxiv:1", "title": "T", "authors": ["A"], "year": 2025,
+             "category": "cs.RO", "categories": ["cs.RO", "cs.LG"]}
+        ) + "\n",
+        encoding="utf-8",
+    )
+    fulltext.write_text(json.dumps({"paper_id": "arxiv:1", "full_text": PAPER}) + "\n", encoding="utf-8")
+
+    chunks = build(fulltext_path=fulltext, papers_path=papers, out_path=out)
+
+    assert chunks and all(c["categories"] == ["cs.RO", "cs.LG"] for c in chunks)
+    assert all(c["category"] == "cs.RO" for c in chunks)

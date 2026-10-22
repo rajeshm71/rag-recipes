@@ -1,4 +1,4 @@
-You are helping search a corpus of ML research papers. Each paper has metadata: category (one of "cs.AI", "cs.LG", "cs.CL") and year. Read the question below and determine whether it references any of these metadata fields explicitly (e.g. "among the cs.LG papers...", "published in 2024...").
+You are helping search a corpus of ML research papers. Each paper has metadata: category (an arXiv category such as "cs.AI", "cs.LG", or "cs.CL"; a paper can be listed in several) and year. Read the question below and determine whether it references any of these metadata fields explicitly (e.g. "among the cs.LG papers...", "published in 2024...").
 
 Question: {question}
 

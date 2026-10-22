@@ -118,3 +118,20 @@ def test_token_counts_summed_across_both_calls():
     assert len(llm.calls) == 2
     expected_input = sum(max(1, len(c.prompt) // 4) for c in llm.calls)
     assert result.input_tokens == expected_input
+
+
+CROSS_LISTED_CORPUS = {
+    "r1": {"chunk_id": "r1", "category": "cs.RO", "categories": ["cs.RO", "cs.LG"], "text": "Robot motion planning."},
+    "v1": {"chunk_id": "v1", "category": "cs.CV", "categories": ["cs.CV"], "text": "Image classification."},
+    "o1": {"chunk_id": "o1", "category": "cs.LG", "text": "Older chunk with a single category field."},
+}
+
+
+def test_category_filter_matches_any_listing_of_a_paper():
+    # r1's primary category is cs.RO but it is also listed in cs.LG, so a cs.LG
+    # filter keeps it; o1 has only the single `category` field and still matches.
+    llm = MockLLM(canned={FILTER_MARKER: '{"category": "cs.lg"}'}, default_response="final answer")
+    fn = make_retrieve_and_answer(CROSS_LISTED_CORPUS, embedder=MockEmbedder(), llm=llm)
+    result = fn("Among the cs.LG papers, which one plans robot motion?", k=5)
+    assert result.extracted_filter == {"category": "cs.LG"}
+    assert set(result.retrieved_chunk_ids) == {"r1", "o1"}

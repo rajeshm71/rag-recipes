@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "corpus"))
 
-from build_corpus import CHUNK_OVERLAP_TOKENS, CHUNK_TOKENS, chunk_text
+from build_corpus import CHUNK_OVERLAP_TOKENS, CHUNK_TOKENS, chunk_text, parse_arxiv_categories
 
 
 class _FakeTokenizer:
@@ -118,3 +118,28 @@ def test_cuts_never_split_a_multibyte_character():
     assert len(chunks) > 1
     assert all("\ufffd" not in c for c in chunks)
     assert all(c in text for c in chunks)
+
+
+ATOM_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/2601.00087v2</id>
+    <arxiv:primary_category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2601.00086v1</id>
+    <arxiv:primary_category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+</feed>
+"""
+
+
+def test_parse_arxiv_categories_lists_every_category_primary_first():
+    assert parse_arxiv_categories(ATOM_RESPONSE) == {
+        "arxiv:2601.00087": ["cs.RO", "cs.LG", "cs.AI"],
+        "arxiv:2601.00086": ["cs.CL"],
+    }

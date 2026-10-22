@@ -53,6 +53,23 @@ def _coerce_filter_value(field: str, value: object) -> str | int | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _chunk_categories(chunk: dict) -> list[str]:
+    """Every arXiv category a chunk's paper is listed in. Older corpora carry
+    only the single `category` field."""
+    categories = chunk.get("categories")
+    if isinstance(categories, list):
+        return categories
+    return [chunk["category"]] if isinstance(chunk.get("category"), str) else []
+
+
+def _matches(chunk: dict, field: str, value: object) -> bool:
+    """A category filter matches a paper listed in that category among
+    others; every other field must be equal."""
+    if field == "category":
+        return value in _chunk_categories(chunk)
+    return chunk.get(field) == value
+
+
 def _parse_filter(text: str) -> dict:
     """Defensive parse, same convention as multi_query.py's
     _parse_subqueries: any failure (bad JSON, non-dict result) degrades to
@@ -95,9 +112,7 @@ def make_retrieve_and_answer(
     # Category values as the corpus spells them, keyed case-insensitively,
     # so "cs.lg" from the LLM filters on the corpus's "cs.LG".
     known_categories = {
-        chunk["category"].lower(): chunk["category"]
-        for chunk in corpus_by_id.values()
-        if isinstance(chunk.get("category"), str)
+        category.lower(): category for chunk in corpus_by_id.values() for category in _chunk_categories(chunk)
     }
 
     def retrieve_and_answer(question: str, k: int = 5) -> AnswerWithCitations:
@@ -122,7 +137,7 @@ def make_retrieve_and_answer(
             filtered_ids = [
                 cid
                 for cid in ranked_ids
-                if all(corpus_by_id[cid].get(field) == value for field, value in extracted_filter.items())
+                if all(_matches(corpus_by_id[cid], field, value) for field, value in extracted_filter.items())
             ]
             # A filter that matches nothing (a category or year the corpus
             # doesn't have) would leave the answer with no context at all;

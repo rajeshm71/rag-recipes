@@ -138,7 +138,8 @@ jupyter lab notebooks/
 ## How the eval works
 
 - **Corpus:** [`corpus/corpus.jsonl`](corpus/corpus.jsonl) -- 333 chunks from 18 arXiv papers
-  (`cs.CL`/`cs.LG`/`cs.AI`), 11 to 20 chunks per paper. Body text only (everything before the
+  listed in `cs.CL`, `cs.LG` or `cs.AI`, 11 to 20 chunks per paper. Each chunk records every arXiv
+  category its paper is listed in (`categories`, primary first). Body text only (everything before the
   references), 512-token chunks with a 64-token overlap on paragraph boundaries, and a `section`
   label derived from each paper's own headings. Built by
   [`corpus/build_from_fulltext.py`](corpus/build_from_fulltext.py) from the committed full texts
