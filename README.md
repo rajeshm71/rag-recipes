@@ -152,7 +152,9 @@ jupyter lab notebooks/
   whose answer is not in the paper's abstract, so a pattern has to find the right chunk, not just
   the right paper. A question can list its `evidence`: one group of chunk ids per piece of evidence
   the answer needs, each group holding every chunk that supplies that piece; `relevant_chunk_ids` is
-  the union of the groups.
+  the union of the groups. [`evals/validate_qa.py`](evals/validate_qa.py) checks these properties
+  (labels exist, multi-hop spans two papers, the filter is needed, labels contain the answer) and
+  runs in CI.
 - **Metrics:** hit@3, hit@10, MRR, recall@10 (deterministic), faithfulness/answer
   relevance/citation accuracy (LLM-as-judge), p50/p95 latency, $/query (generation cost only), eval
   cost (generation plus judges) -- every quality metric reported with a 95% bootstrap confidence
