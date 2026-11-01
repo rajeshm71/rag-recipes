@@ -116,41 +116,71 @@ class PairScoreCache:
         return reused
 
 
+class SharedIndexes:
+    """What every row can build on: the dense and BM25 indexes over the chunk
+    text, and the shared cross-encoder score cache. Built once per run; a row
+    that needs an index over different text builds its own from
+    `corpus_by_id`."""
+
+    def __init__(
+        self, corpus_by_id: dict[str, dict], embedder: Embedder, embedding_model: str, pair_cache: PairScoreCache
+    ) -> None:
+        self.corpus_by_id = corpus_by_id
+        self.embedder = embedder
+        self.embedding_model = embedding_model
+        self.pair_cache = pair_cache
+        chunk_ids = list(corpus_by_id.keys())
+        self.store = build_dense_index(corpus_by_id, embedder, embedding_model)
+        self.bm25 = BM25Index()
+        self.bm25.build(chunk_ids, [corpus_by_id[cid]["text"] for cid in chunk_ids])
+
+    def dense(self, q: str, k: int) -> list[str]:
+        return dense_search(self.store, self.embedder, self.embedding_model, q, k)
+
+    def bm25_search(self, q: str, k: int) -> list[str]:
+        return [r.chunk_id for r in self.bm25.search(q, k)]
+
+    def hybrid(self, q: str, k: int) -> list[str]:
+        return rrf_fuse([self.dense(q, CANDIDATES), self.bm25_search(q, CANDIDATES)], k)
+
+    def rerank(self, q: str, candidates: list[str], k: int) -> list[str]:
+        return self.pair_cache.rerank(q, candidates, k)
+
+
+@dataclass(frozen=True)
+class Pattern:
+    """One leaderboard row: its name and a function that turns the shared
+    indexes into the row's retriever."""
+
+    name: str
+    build: Callable[[SharedIndexes], Retriever]
+
+
+# The leaderboard's rows, in table order before ranking. Adding a row is one entry here.
+PATTERNS = (
+    Pattern("01_naive_dense", lambda s: s.dense),
+    Pattern("02_bm25", lambda s: s.bm25_search),
+    Pattern("03_hybrid_rrf", lambda s: s.hybrid),
+    Pattern("04_bm25_rerank", lambda s: lambda q, k: s.rerank(q, s.bm25_search(q, CANDIDATES), k)),
+    Pattern("03+04_hybrid_rerank", lambda s: lambda q, k: s.rerank(q, s.hybrid(q, CANDIDATES), k)),
+)
+
+
 def build_retrievers(
     corpus_by_id: dict[str, dict],
     embedder: Embedder,
     reranker: Reranker,
     embedding_model: str,
     pair_cache: PairScoreCache | None = None,
+    patterns: tuple[Pattern, ...] = PATTERNS,
 ) -> dict[str, Retriever]:
+    names = [p.name for p in patterns]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate pattern names: {duplicates}")
     pair_cache = pair_cache or PairScoreCache(reranker, corpus_by_id)
-    chunk_ids = list(corpus_by_id.keys())
-    store = build_dense_index(corpus_by_id, embedder, embedding_model)
-    bm25 = BM25Index()
-    bm25.build(chunk_ids, [corpus_by_id[cid]["text"] for cid in chunk_ids])
-
-    def dense(q: str, k: int) -> list[str]:
-        return dense_search(store, embedder, embedding_model, q, k)
-
-    def bm25_only(q: str, k: int) -> list[str]:
-        return [r.chunk_id for r in bm25.search(q, k)]
-
-    def hybrid(q: str, k: int) -> list[str]:
-        return rrf_fuse([dense(q, CANDIDATES), bm25_only(q, CANDIDATES)], k)
-
-    def bm25_rerank(q: str, k: int) -> list[str]:
-        return pair_cache.rerank(q, bm25_only(q, CANDIDATES), k)
-
-    def hybrid_rerank(q: str, k: int) -> list[str]:
-        return pair_cache.rerank(q, hybrid(q, CANDIDATES), k)
-
-    return {
-        "01_naive_dense": dense,
-        "02_bm25": bm25_only,
-        "03_hybrid_rrf": hybrid,
-        "04_bm25_rerank": bm25_rerank,
-        "03+04_hybrid_rerank": hybrid_rerank,
-    }
+    shared = SharedIndexes(corpus_by_id, embedder, embedding_model, pair_cache)
+    return {p.name: p.build(shared) for p in patterns}
 
 
 def score(
@@ -351,6 +381,7 @@ def run(
     embedder: Embedder | None = None,
     reranker: Reranker | None = None,
     pool_path: Path | None = None,
+    patterns: tuple[Pattern, ...] = PATTERNS,
 ) -> tuple[str, list[Row]]:
     mock = os.environ.get("RAG_RECIPES_LLM", "openai").lower() == "mock"
     if embedder is None:
@@ -363,7 +394,7 @@ def run(
     corpus_by_id = load_corpus_by_id(corpus_path)
     qa_set = load_qa_set(qa_path)
     pair_cache = PairScoreCache(reranker, corpus_by_id)
-    retrievers = build_retrievers(corpus_by_id, embedder, reranker, embedding_model, pair_cache)
+    retrievers = build_retrievers(corpus_by_id, embedder, reranker, embedding_model, pair_cache, patterns)
     rows = [
         score(name, fn, qa_set, extra_latency_ms=pair_cache.take_reused_ms) for name, fn in retrievers.items()
     ]

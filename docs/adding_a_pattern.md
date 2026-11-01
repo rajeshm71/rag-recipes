@@ -146,6 +146,20 @@ order, and title wording against this list.
 Add your pattern to `notebooks/11_leaderboard.ipynb`'s `PATTERNS` list (one import + one lambda
 factory entry, matching the existing 10 entries' shape).
 
+If the pattern's retrieval step needs no LLM, also give it a row on the retrieval leaderboard by
+adding one `Pattern` to `PATTERNS` in `evals/retrieval_leaderboard.py`. A row is a name and a
+function that receives the shared indexes (`SharedIndexes`: `dense`, `bm25_search`, `hybrid`,
+`rerank`, and `corpus_by_id` for building an index of your own) and returns
+`retrieve(question, k) -> list[chunk_id]`:
+
+```python
+Pattern("05_my_pattern", lambda s: lambda q, k: s.rerank(q, my_candidates(s, q), k)),
+```
+
+Use `s.rerank` rather than a reranker of your own so cross-encoder scores are shared between rows
+and each row's latency still counts the scoring it needed. The new row then appears in both tables
+and in `--pool`. Regenerate the committed tables with `uv run python evals/retrieval_leaderboard.py`.
+
 ## 5. Local verification checklist
 
 ```bash

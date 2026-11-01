@@ -41,7 +41,8 @@ of these.
 4. Add `notebooks/<NN>_<name>.ipynb` following the mandatory 8-section template (see
    `docs/adding_a_pattern.md`), including the required "Where this pattern FAILS" section.
 5. Extend `notebooks/11_leaderboard.ipynb` to include the new row. If the pattern's retrieval step
-   needs no LLM, also add it to `evals/retrieval_leaderboard.py` and regenerate the committed table
+   needs no LLM, also add a `Pattern` to `PATTERNS` in `evals/retrieval_leaderboard.py` (see
+   `docs/adding_a_pattern.md`) and regenerate the committed table
    with `uv run python evals/retrieval_leaderboard.py` (CI checks it whenever a change can move the numbers).
 6. Add a decision node to `docs/choosing.md` if the pattern changes the recommendation logic.
 7. Run locally before opening a PR: `ruff check .`, `python scripts/lint_notebooks.py`, `pytest

@@ -8,11 +8,13 @@ import time
 import pytest
 
 from evals.retrieval_leaderboard import (
+    PATTERNS,
     README_BLOCKS,
     README_CATEGORY_END,
     README_CATEGORY_START,
     README_END,
     README_START,
+    Pattern,
     build_retrievers,
     category_table,
     category_table_only,
@@ -283,3 +285,34 @@ def test_candidate_pool_lists_every_chunk_any_row_found(tmp_path):
         assert c["best_rank"] == min(c["found_by"].values())
         assert c["text"] == CORPUS[c["chunk_id"]]["text"]
     assert [c["best_rank"] for c in entry["candidates"]] == sorted(c["best_rank"] for c in entry["candidates"])
+
+
+def _last_chunk_first(shared):
+    """A toy row built from the shared indexes: BM25 order, reversed."""
+    return lambda q, k: list(reversed(shared.bm25_search(q, len(shared.corpus_by_id))))[:k]
+
+
+def test_a_registered_row_reaches_both_tables_and_the_pool(tmp_path):
+    corpus_path = tmp_path / "corpus.jsonl"
+    qa_path = tmp_path / "qa.jsonl"
+    pool_path = tmp_path / "pool.jsonl"
+    corpus = {cid: {**c, "paper_id": f"p{cid}"} for cid, c in CORPUS.items()}
+    corpus_path.write_text("\n".join(json.dumps(c) for c in corpus.values()) + "\n", encoding="utf-8")
+    qa_path.write_text("\n".join(json.dumps(q) for q in QA_WITH_CATEGORIES) + "\n", encoding="utf-8")
+    patterns = (*PATTERNS, Pattern("99_reversed_bm25", _last_chunk_first))
+
+    md, rows = run(
+        corpus_path, qa_path, embedder=MockEmbedder(), reranker=MockReranker(), pool_path=pool_path, patterns=patterns
+    )
+
+    assert [r.name for r in rows] == [p.name for p in patterns]
+    assert "| 99_reversed_bm25 |" in table_only(md)
+    assert "| 99_reversed_bm25 |" in category_table_only(md)
+    pool = [json.loads(line) for line in pool_path.read_text(encoding="utf-8").splitlines()]
+    assert any("99_reversed_bm25" in c["found_by"] for entry in pool for c in entry["candidates"])
+
+
+def test_duplicate_row_names_are_rejected():
+    patterns = (*PATTERNS, Pattern("02_bm25", lambda s: s.bm25_search))
+    with pytest.raises(ValueError, match="02_bm25"):
+        build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock", patterns=patterns)
