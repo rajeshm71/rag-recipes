@@ -7,8 +7,9 @@ the one-time model download, reproducible on any machine:
     uv run python evals/retrieval_leaderboard.py --per-question out.jsonl   # also dump per-question ranks
     uv run python evals/retrieval_leaderboard.py --pool pool.jsonl          # also dump each question's candidate chunks
 
-Rows: naive dense, BM25, hybrid (RRF), BM25 + cross-encoder rerank, and
-hybrid + rerank. Metrics: hit@3, hit@10, MRR, recall@10 (fraction of a
+Rows: naive dense, BM25, hybrid (RRF), BM25 + cross-encoder rerank,
+hybrid + rerank, and hybrid + rerank over chunks indexed with their paper
+title and section in front (contextual chunk headers). Metrics: hit@3, hit@10, MRR, recall@10 (fraction of a
 question's evidence found in the top 10; see evals.metrics.recall_at_k),
 each with a 95% bootstrap CI,
 plus each row's paired MRR difference from the top row and p50 latency.
@@ -156,6 +157,25 @@ class Pattern:
     build: Callable[[SharedIndexes], Retriever]
 
 
+def header_text(chunk: dict) -> str:
+    """The chunk's text with its paper title and section label in front, so
+    a chunk that never names its paper or topic can still match on them."""
+    title, section = chunk.get("title"), chunk.get("section")
+    parts = [f"Paper: {title}."] if title else []
+    if section and section != "other":
+        parts.append(f"Section: {section.replace('_', ' ')}.")
+    return " ".join(parts) + "\n\n" + chunk["text"] if parts else chunk["text"]
+
+
+def headers_hybrid_rerank(s: SharedIndexes) -> Retriever:
+    """Hybrid retrieval over header-prefixed chunks, then the same cross-encoder
+    rerank as 03+04 on the plain chunk text: the headers change only which
+    candidates reach the reranker."""
+    with_headers = {cid: {**c, "text": header_text(c)} for cid, c in s.corpus_by_id.items()}
+    h = SharedIndexes(with_headers, s.embedder, s.embedding_model, s.pair_cache)
+    return lambda q, k: h.rerank(q, h.hybrid(q, CANDIDATES), k)
+
+
 # The leaderboard's rows, in table order before ranking. Adding a row is one entry here.
 PATTERNS = (
     Pattern("01_naive_dense", lambda s: s.dense),
@@ -163,6 +183,7 @@ PATTERNS = (
     Pattern("03_hybrid_rrf", lambda s: s.hybrid),
     Pattern("04_bm25_rerank", lambda s: lambda q, k: s.rerank(q, s.bm25_search(q, CANDIDATES), k)),
     Pattern("03+04_hybrid_rerank", lambda s: lambda q, k: s.rerank(q, s.hybrid(q, CANDIDATES), k)),
+    Pattern("03+04_hybrid_rerank_headers", headers_hybrid_rerank),
 )
 
 

@@ -15,9 +15,11 @@ from evals.retrieval_leaderboard import (
     README_END,
     README_START,
     Pattern,
+    SharedIndexes,
     build_retrievers,
     category_table,
     category_table_only,
+    header_text,
     readme_table,
     render,
     run,
@@ -43,7 +45,14 @@ QA = [
 
 def test_every_pattern_row_is_scored():
     retrievers = build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock")
-    assert list(retrievers) == ["01_naive_dense", "02_bm25", "03_hybrid_rrf", "04_bm25_rerank", "03+04_hybrid_rerank"]
+    assert list(retrievers) == [
+        "01_naive_dense",
+        "02_bm25",
+        "03_hybrid_rrf",
+        "04_bm25_rerank",
+        "03+04_hybrid_rerank",
+        "03+04_hybrid_rerank_headers",
+    ]
     row = score("02_bm25", retrievers["02_bm25"], QA)
     # BM25 ranks c1 first for q1 and c2 first for q2; c4 shares no terms
     # with q2, so recall@10 for q2 is 0.5 and the mean is 0.75.
@@ -91,7 +100,7 @@ def test_run_on_files(tmp_path):
     corpus_path.write_text("\n".join(json.dumps(c) for c in CORPUS.values()) + "\n", encoding="utf-8")
     qa_path.write_text("\n".join(json.dumps(q) for q in QA) + "\n", encoding="utf-8")
     md, rows = run(corpus_path, qa_path, embedder=MockEmbedder(), reranker=MockReranker())
-    assert len(rows) == 5
+    assert len(rows) == len(PATTERNS)
     assert md.startswith("# Retrieval leaderboard")
     assert "2 questions, 4 chunks" in md
 
@@ -316,3 +325,48 @@ def test_duplicate_row_names_are_rejected():
     patterns = (*PATTERNS, Pattern("02_bm25", lambda s: s.bm25_search))
     with pytest.raises(ValueError, match="02_bm25"):
         build_retrievers(CORPUS, MockEmbedder(), MockReranker(), "mock", patterns=patterns)
+
+
+def test_header_text_puts_title_and_section_in_front():
+    chunk = {"title": "Fast Decoding", "section": "related_work", "text": "Prior methods ..."}
+    assert header_text(chunk) == "Paper: Fast Decoding. Section: related work.\n\nPrior methods ..."
+    # The catch-all section label adds nothing; a chunk without either field is unchanged.
+    assert header_text({**chunk, "section": "other"}) == "Paper: Fast Decoding.\n\nPrior methods ..."
+    assert header_text({"text": "Prior methods ..."}) == "Prior methods ..."
+
+
+TITLED = {
+    "c1": {"chunk_id": "c1", "title": "Speculative Decoding at Scale", "section": "results", "text": "It is 2x faster."},
+    "c2": {"chunk_id": "c2", "title": "Image Models", "section": "methods", "text": "We train a CNN."},
+}
+
+
+def test_headers_let_a_chunk_match_on_its_paper_title():
+    plain = SharedIndexes(TITLED, MockEmbedder(), "mock", None)
+    with_headers = {cid: {**c, "text": header_text(c)} for cid, c in TITLED.items()}
+    headed = SharedIndexes(with_headers, MockEmbedder(), "mock", None)
+
+    assert plain.bm25_search("speculative decoding speedup", 1) == []
+    assert headed.bm25_search("speculative decoding speedup", 1) == ["c1"]
+
+
+def test_headers_row_reranks_plain_text_and_shares_scores_with_hybrid_rerank():
+    counting = _CountingReranker()
+    seen_texts: list[str] = []
+    original = counting.rerank
+
+    def recording(query, candidates, top_k):
+        seen_texts.extend(text for _, text in candidates)
+        return original(query, candidates, top_k)
+
+    counting.rerank = recording
+    retrievers = build_retrievers(TITLED, MockEmbedder(), counting, "mock")
+    question = "speculative decoding"
+
+    retrievers["03+04_hybrid_rerank"](question, 2)
+    scored_before = len(counting.scored_pairs)
+    retrievers["03+04_hybrid_rerank_headers"](question, 2)
+
+    # Both rows see the whole two-chunk corpus, so the headers row reuses every score.
+    assert len(counting.scored_pairs) == scored_before == len(TITLED)
+    assert not any(text.startswith("Paper:") for text in seen_texts)
