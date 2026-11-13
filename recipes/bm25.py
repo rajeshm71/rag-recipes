@@ -32,10 +32,48 @@ def _tokenize(text: str) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
 
 
+# Common English function words, plus the question words queries start with.
+_STOPWORD_TEXT = """
+a about above after again against all also am an and any are as at be because been before being
+below between both but by can could did do does doing down during each few for from further had has
+have having he her here hers him his how i if in into is it its itself just me more most my no nor
+not of off on once only or other our ours out over own same she should so some such than that the
+their theirs them then there these they this those through to too under until up very was we were
+what when where which while who whom why will with would you your yours
+"""
+STOPWORDS = frozenset(_STOPWORD_TEXT.split())
+
+
+def fold_plural(token: str) -> str:
+    """A light English plural folding: "studies" -> "study", "boxes" -> "box",
+    "models" -> "model". Leaves short words, numbers, and words ending in
+    -ss, -us, -is alone ("loss", "corpus", "analysis"). Applied to the
+    index and the query alike, so a rare wrong fold still matches itself."""
+    if len(token) <= 3 or not token.isalpha() or token.endswith(("ss", "us", "is")):
+        return token
+    if token.endswith("ies") and len(token) > 4:
+        return token[:-3] + "y"
+    if token.endswith(("sses", "xes", "zes", "ches", "shes")):
+        return token[:-2]
+    if token.endswith("s"):
+        return token[:-1]
+    return token
+
+
 class BM25Index:
-    def __init__(self) -> None:
+    """BM25 over lowercase alphanumeric tokens. `stopwords` drops those
+    tokens from chunks and queries; `fold_plurals` maps plural forms to
+    their singular (see fold_plural). Both are off by default."""
+
+    def __init__(self, stopwords: frozenset[str] | None = None, fold_plurals: bool = False) -> None:
         self._chunk_ids: list[str] = []
         self._bm25 = None
+        self._stopwords = stopwords or frozenset()
+        self._fold_plurals = fold_plurals
+
+    def _tokens(self, text: str) -> list[str]:
+        tokens = [t for t in _tokenize(text) if t not in self._stopwords]
+        return [fold_plural(t) for t in tokens] if self._fold_plurals else tokens
 
     def build(self, chunk_ids: list[str], texts: list[str]) -> None:
         from rank_bm25 import BM25Okapi
@@ -43,7 +81,7 @@ class BM25Index:
         if len(chunk_ids) != len(texts):
             raise ValueError("chunk_ids and texts must be the same length")
         self._chunk_ids = list(chunk_ids)
-        tokenized = [_tokenize(t) for t in texts]
+        tokenized = [self._tokens(t) for t in texts]
         self._token_sets = [set(tokens) for tokens in tokenized]
         self._bm25 = BM25Okapi(tokenized)
 
@@ -60,7 +98,7 @@ class BM25Index:
         """
         if self._bm25 is None:
             raise RuntimeError("BM25Index.build() must be called before search()")
-        query_tokens = _tokenize(query)
+        query_tokens = self._tokens(query)
         query_set = set(query_tokens)
         scores = self._bm25.get_scores(query_tokens)
         ranked = sorted(

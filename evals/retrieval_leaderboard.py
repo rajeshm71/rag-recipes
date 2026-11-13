@@ -9,7 +9,8 @@ the one-time model download, reproducible on any machine:
 
 Rows: naive dense, BM25, hybrid (RRF), BM25 + cross-encoder rerank,
 hybrid + rerank, and hybrid + rerank over chunks indexed with their paper
-title and section in front (contextual chunk headers). Metrics: hit@3, hit@10, MRR, recall@10 (fraction of a
+title and section in front (contextual chunk headers), and BM25 with
+stopwords dropped and plurals folded. Metrics: hit@3, hit@10, MRR, recall@10 (fraction of a
 question's evidence found in the top 10; see evals.metrics.recall_at_k),
 each with a 95% bootstrap CI,
 plus each row's paired MRR difference from the top row and p50 latency.
@@ -46,7 +47,7 @@ from evals.metrics import (
     recall_at_k,
 )
 from evals.run import load_corpus_by_id, load_qa_set
-from recipes.bm25 import BM25Index
+from recipes.bm25 import STOPWORDS, BM25Index
 from recipes.dense_index import build_dense_index, dense_search
 from recipes.embeddings import Embedder, LocalEmbedder, MockEmbedder
 from recipes.hybrid import rrf_fuse
@@ -176,10 +177,19 @@ def headers_hybrid_rerank(s: SharedIndexes) -> Retriever:
     return lambda q, k: h.rerank(q, h.hybrid(q, CANDIDATES), k)
 
 
+def bm25_normalized(s: SharedIndexes) -> Retriever:
+    """BM25 with stopwords dropped and plurals folded, on the plain chunk text."""
+    index = BM25Index(stopwords=STOPWORDS, fold_plurals=True)
+    chunk_ids = list(s.corpus_by_id)
+    index.build(chunk_ids, [s.corpus_by_id[cid]["text"] for cid in chunk_ids])
+    return lambda q, k: [r.chunk_id for r in index.search(q, k)]
+
+
 # The leaderboard's rows, in table order before ranking. Adding a row is one entry here.
 PATTERNS = (
     Pattern("01_naive_dense", lambda s: s.dense),
     Pattern("02_bm25", lambda s: s.bm25_search),
+    Pattern("02_bm25_normalized", bm25_normalized),
     Pattern("03_hybrid_rrf", lambda s: s.hybrid),
     Pattern("04_bm25_rerank", lambda s: lambda q, k: s.rerank(q, s.bm25_search(q, CANDIDATES), k)),
     Pattern("03+04_hybrid_rerank", lambda s: lambda q, k: s.rerank(q, s.hybrid(q, CANDIDATES), k)),

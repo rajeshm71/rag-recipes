@@ -48,6 +48,7 @@ def test_every_pattern_row_is_scored():
     assert list(retrievers) == [
         "01_naive_dense",
         "02_bm25",
+        "02_bm25_normalized",
         "03_hybrid_rrf",
         "04_bm25_rerank",
         "03+04_hybrid_rerank",
